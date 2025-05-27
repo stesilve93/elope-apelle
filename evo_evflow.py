@@ -13,6 +13,8 @@ from scipy.optimize import minimize
 import warnings
 warnings.filterwarnings('ignore')
 
+from evflow.EVFlowNet import EVFlowNet
+
 class EventProcessor:
     """Process event camera data for optical flow estimation"""
     
@@ -100,7 +102,11 @@ class OpticalFlowEstimator:
     
     def __init__(self, device='cpu'):
         self.device = device
-        self.evflownet = EVFlowNet(input_channels=2).to(device)
+        from evflow.config import configs  # Assuming configs is defined in evflow/config.py
+        args = configs()
+        print("Initializing EVFlowNet with args:", args)
+        self.evflownet = EVFlowNet(args).to(device)
+        print("EVFlowNet initialized")
         self.evflownet.eval()  # Set to evaluation mode
         self.flow_history = []
         
@@ -173,92 +179,6 @@ class OpticalFlowEstimator:
         flow = cv2.calcOpticalFlowFarneback(frame1_uint8, frame2_uint8, None, 0.5, 3, 15, 3, 5, 1.2, 0)
         return flow
 
-class EVFlowNet(nn.Module):
-    """EVFlowNet-inspired architecture for event-based optical flow estimation"""
-    
-    def __init__(self, input_channels=2):
-        super(EVFlowNet, self).__init__()
-        
-        # Encoder with residual connections
-        self.conv1 = nn.Conv2d(input_channels, 32, 7, padding=3)
-        self.conv1_1 = nn.Conv2d(32, 32, 3, padding=1)
-        self.bn1 = nn.BatchNorm2d(32)
-        
-        self.conv2 = nn.Conv2d(32, 64, 5, stride=2, padding=2)
-        self.conv2_1 = nn.Conv2d(64, 64, 3, padding=1)
-        self.bn2 = nn.BatchNorm2d(64)
-        
-        self.conv3 = nn.Conv2d(64, 128, 3, stride=2, padding=1)
-        self.conv3_1 = nn.Conv2d(128, 128, 3, padding=1)
-        self.bn3 = nn.BatchNorm2d(128)
-        
-        self.conv4 = nn.Conv2d(128, 256, 3, stride=2, padding=1)
-        self.conv4_1 = nn.Conv2d(256, 256, 3, padding=1)
-        self.bn4 = nn.BatchNorm2d(256)
-        
-        # Decoder with skip connections
-        self.upconv4 = nn.ConvTranspose2d(256, 128, 4, stride=2, padding=1)
-        self.iconv4 = nn.Conv2d(256, 128, 3, padding=1)  # 128 + 128 from skip
-        
-        self.upconv3 = nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1)
-        self.iconv3 = nn.Conv2d(128, 64, 3, padding=1)   # 64 + 64 from skip
-        
-        self.upconv2 = nn.ConvTranspose2d(64, 32, 4, stride=2, padding=1)
-        self.iconv2 = nn.Conv2d(64, 32, 3, padding=1)    # 32 + 32 from skip
-        
-        # Flow prediction layers
-        self.flow_pred4 = nn.Conv2d(128, 2, 3, padding=1)
-        self.flow_pred3 = nn.Conv2d(64, 2, 3, padding=1)
-        self.flow_pred2 = nn.Conv2d(32, 2, 3, padding=1)
-        
-        self.relu = nn.ReLU(inplace=True)
-        self.leaky_relu = nn.LeakyReLU(0.1, inplace=True)
-        
-        # Initialize weights
-        self._initialize_weights()
-        
-    def _initialize_weights(self):
-        """Initialize network weights"""
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.BatchNorm2d):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
-        
-    def forward(self, x):
-        # Encoder
-        conv1 = self.leaky_relu(self.bn1(self.conv1_1(self.leaky_relu(self.conv1(x)))))
-        conv2 = self.leaky_relu(self.bn2(self.conv2_1(self.leaky_relu(self.conv2(conv1)))))
-        conv3 = self.leaky_relu(self.bn3(self.conv3_1(self.leaky_relu(self.conv3(conv2)))))
-        conv4 = self.leaky_relu(self.bn4(self.conv4_1(self.leaky_relu(self.conv4(conv3)))))
-        
-        # Decoder with skip connections
-        upconv4 = self.leaky_relu(self.upconv4(conv4))
-        concat4 = torch.cat([upconv4, conv3], dim=1)
-        iconv4 = self.leaky_relu(self.iconv4(concat4))
-        flow4 = self.flow_pred4(iconv4)
-        
-        upconv3 = self.leaky_relu(self.upconv3(iconv4))
-        # Upsample flow4 to match conv2 size
-        flow4_up = F.interpolate(flow4, size=conv2.shape[2:], mode='bilinear', align_corners=False)
-        concat3 = torch.cat([upconv3, conv2, flow4_up], dim=1)
-        iconv3 = self.leaky_relu(self.iconv3(concat3[:, :128, :, :]))  # Take first 128 channels
-        flow3 = self.flow_pred3(iconv3)
-        
-        upconv2 = self.leaky_relu(self.upconv2(iconv3))
-        # Upsample flow3 to match conv1 size
-        flow3_up = F.interpolate(flow3, size=conv1.shape[2:], mode='bilinear', align_corners=False)
-        concat2 = torch.cat([upconv2, conv1, flow3_up], dim=1)
-        iconv2 = self.leaky_relu(self.iconv2(concat2[:, :64, :, :]))  # Take first 64 channels
-        flow2 = self.flow_pred2(iconv2)
-        
-        # Upsample final flow to input size
-        final_flow = F.interpolate(flow2, size=x.shape[2:], mode='bilinear', align_corners=False)
-        
-        return final_flow
 
 class TrajectoryEstimator:
     """Estimate trajectory from optical flow, range, and IMU data"""
@@ -374,7 +294,6 @@ class LunarDescentPipeline:
         
         for i in range(len(frames) - 1):
             try:
-                raise Exception("Skip EVFlownet")  # Simulate failure for testing
                 # Use EVFlowNet for optical flow estimation
                 flow = self.flow_estimator.estimate_flow_evflownet(frames[i], frames[i+1])
                 flows.append(flow)
@@ -480,7 +399,7 @@ def run_lunar_descent_pipeline():
     """Run the complete pipeline"""
     
     # Load data
-    datapath = './elope_data'
+    datapath = '/home/stesilve/Documents/github/elope/elope_data'
     fn = os.path.join(datapath, 'train', '0000.npz')
     
     try:
@@ -498,8 +417,11 @@ def run_lunar_descent_pipeline():
         # Initialize and run pipeline
         pipeline = LunarDescentPipeline(use_gpu=True)  # Enable GPU if available
         
-        # Optionally load pre-trained weights
-        # pipeline.load_pretrained_weights('path/to/evflownet_weights.pth')
+        # Load pre-trained weights from TensorFlow checkpoint
+        pipeline.load_pretrained_weights('./weights/ev-flownet/ev-flownet/model.pth')  
+        
+        # Or inspect TensorFlow checkpoint structure first
+        # pipeline.inspect_checkpoint('path/to/model.ckpt-600023.meta')
         
         results = pipeline.process_sequence(events, timestamps, trajectory, rangemeter)
         
