@@ -254,7 +254,6 @@ class LunarDescentPipeline:
         # In practice, you would load pre-trained weights here:
         # self.flow_estimator.evflownet.load_state_dict(torch.load('evflownet_weights.pth'))
         
-        # For this demo, we use the randomly initialized weights
         print("EVFlowNet initialized with random weights")
         print("Note: In practice, you should load pre-trained weights for better performance")
         
