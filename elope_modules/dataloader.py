@@ -185,7 +185,7 @@ class DataLoader:
                          time_window: float = 1e5,
                          H: int = 200, W: int = 200, T: int = 10) -> np.ndarray:
         """
-        Preprocess events into a 4D tensor representation.
+        Preprocess events into a 4D tensor representation (EVFlownet-like).
 
         Args:
             events: Raw events array with columns [x, y, p, t].
@@ -233,6 +233,7 @@ class DataLoader:
 
         return tensor.astype(np.float32)
     
+    # Legacy methods for modular processing of events, IMU, and rangemeter data (i.e. not using end-to-end deep network processing).
     def preprocess_imu(self, trajectory: np.ndarray, seq_len: int = 50) -> np.ndarray:
         """
         Extract IMU data (Euler angles + angular velocities) from trajectory

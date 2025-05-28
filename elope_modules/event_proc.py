@@ -17,7 +17,19 @@ class EventProcessor:
     """Process event camera data for optical flow estimation"""
     
     def __init__(self, width=200, height=200):
+        """
+        Initialize the EventProcessor with given width and height.
+        
+        Parameters
+        ----------
+        width : int, optional
+            The width of the event frame, default is 200.
+        height : int, optional
+            The height of the event frame, default is 200.
+        """
+        # Set the width of the event frame
         self.width = width
+        # Set the height of the event frame
         self.height = height
         
     def events_to_frames(self, events, end_time=0, time_window=1e5, method='count'):

@@ -52,7 +52,8 @@ class LunarDescentPipeline:
         except Exception as e:
             print(f"Failed to load weights: {str(e)}")
             print("Using randomly initialized weights")
-        
+    
+    ## TODO: review the code to include end-to-end emmnet processing and visualization
     def process_sequence(self, events, timestamps, trajectory, rangemeter):
         """Process complete sequence and estimate velocities
         
