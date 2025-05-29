@@ -8,7 +8,7 @@ This work addresses the critical problem of real-time, robust 6-Degree-of-Freedo
 
 The proposed system takes as input:
 1.  An event stream $\mathcal{E} = \{ (x_k, y_k, t_k, p_k) \}_{k=1}^{N_e}$, where $(x_k, y_k)$ are pixel coordinates, $t_k$ is the timestamp, and $p_k \in \{-1, +1\}$ denotes the event polarity (brightness increase or decrease).
-2.  A sequence of IMU readings $\mathbf{I}_{\text{seq}} = \{ [a_x, a_y, a_z, \omega_x, \omega_y, \omega_z]^T \}_j$, comprising linear accelerations and angular velocities.
+2.  A sequence of IMU readings $\mathbf{I}_{\text{seq}} = \{ [\phi, \theta, \psi, \omega_x, \omega_y, \omega_z]^T \}_j$, comprising Euler angles and angular velocities.
 3.  A sequence of rangemeter readings $\mathbf{R}_{\text{seq}} = \{ r_j \}_j$, representing distance measurements.
 
 The objective is to accurately predict the 6-DoF ego-motion state $\hat{\mathbf{x}}_t = [\hat{p}_x, \hat{p}_y, \hat{p}_z, \hat{v}_x, \hat{v}_y, \hat{v}_z]^T$ (3D position and 3D linear velocity) at time $t$.
