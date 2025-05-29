@@ -55,6 +55,6 @@ print(f"Model has {sum(p.numel() for p in model.parameters())} parameters")
 trainer = LunarTrainer(model, train_loader, val_loader, device)
 
 # Train model
-trainer.train(num_epochs=100, save_path='best_lunar_pose_model.pth')
+trainer.train(num_epochs=100, save_path='best_lunar_pose_model_velocity.pth')
 
 print("Training completed!")

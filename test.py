@@ -10,6 +10,7 @@ import seaborn as sns
 
 from elope_modules.dataloader import DataLoader
 from elope_modules.emmnet import create_model 
+from elope_modules.elopeDataset import LunarTrainer as lt
 
 def run_realtime_prediction_and_extract_features(
     model: nn.Module,
@@ -379,14 +380,14 @@ def visualize_activation_maps(
 
     plt.suptitle(f'Input Events vs. Activation Map (Layer: {layer_name}, Map Index: {feature_map_idx})', fontsize=14, y=1.05)
     plt.tight_layout(rect=[0.02, 0.03, 1, 0.98])
-    plt.savefig(f"input_vs_activation_{layer_name.replace('.', '_')}_map{feature_map_idx}_{TEST_SEQUENCE_ID}.png", dpi=300)
+    plt.savefig(f"./plots/input_vs_activation_{layer_name.replace('.', '_')}_map{feature_map_idx}_{TEST_SEQUENCE_ID}.png", dpi=300)
     
 
 # --- Main execution block for testing ---
 if __name__ == "__main__":
     # --- Configuration ---
     DATAPATH = './elope_data' # Adjust as needed
-    MODEL_PATH = 'best_lunar_pose_model.pth' # Path to your trained model weights
+    MODEL_PATH = 'best_lunar_pose_model_velocity.pth' # Path to your trained model weights
     TEST_SEQUENCE_ID = '0020' # A test sequence not used in training (e.g., the first test trajectory)
     EXTRACT_INTERMEDIATE_FEATURES = False # Set to True if you want to extract event features
     USE_ATTENTION = True # Must match how your trained model was created
@@ -459,7 +460,7 @@ if __name__ == "__main__":
             plt.xlabel('t-SNE Component 1')
             plt.ylabel('t-SNE Component 2')
             plt.grid(True)
-            plt.savefig(f"event_features_tsne_{TEST_SEQUENCE_ID}.png", dpi=300)
+            plt.savefig(f"./plots/event_features_tsne_{TEST_SEQUENCE_ID}.png", dpi=300)
             plt.show()
 
             print("t-SNE plot saved.")
@@ -472,11 +473,15 @@ if __name__ == "__main__":
             event_integration_window_us=1e5, # Same as training
             imu_seq_len=5, # Same as training
             H=200, W=200, T=10, # Same as training
-            prediction_interval_s=0.01, # Make a prediction every 50ms
+            prediction_interval_s=0.1, # Make a prediction every 50ms
             start_offset_s=0.5, # Ensure at least 0.5s of data for LSTM warm-up
             device=DEVICE
         )
-
+    
+    test_metrics = lt.compute_metrics(torch.tensor(predicted_states), torch.tensor(ground_truth_states))
+    print(test_metrics)
+    print(f"Test Metrics - Pos Error: {test_metrics['position_error']:.2f}m, "
+                      f"Vel Error: {test_metrics['velocity_error']:.2f}m/s", f"elope_score: {test_metrics['elope_score']:.4f}")
     if len(predicted_states) > 0:
         print("\nPrediction Results:")
         print(f"Total predictions: {len(predicted_states)}")
@@ -524,7 +529,7 @@ if __name__ == "__main__":
 
         plt.suptitle(f'6-DOF State Prediction vs. Ground Truth for Sequence {TEST_SEQUENCE_ID}', fontsize=16, y=1.02) # Add a main title
         plt.tight_layout(rect=[0, 0.03, 1, 0.98]) # Adjust layout to make space for suptitle
-        plt.savefig(f"lunar_descent_predictions_{TEST_SEQUENCE_ID}.png", dpi=300) # Save with sequence ID in filename and higher DPI
+        plt.savefig(f"./plots/lunar_descent_predictions_{TEST_SEQUENCE_ID}.png", dpi=300) # Save with sequence ID in filename and higher DPI
     else:
         print("No predictions were made. Check sequence ID, data path, or time offsets.")
 
@@ -561,7 +566,7 @@ if __name__ == "__main__":
                         print(f"Name: {name:<50} Type: {type(module)}")
                 print("-----------------------------------\n")
 
-            print_model_layers(model)
+            #print_model_layers(model)
             visualize_activation_maps(model, sample_data_point, 'layer1.1.conv1', feature_map_idx=3, device=DEVICE)
             # Or the activation *after* the initial block's MaxPool3d:
             # visualize_activation_maps(model, sample_data_point, 'event_encoder.initial_block.3', num_maps_to_plot=8, device=DEVICE) # Index 3 is MaxPool3d if initial_block is Sequential

@@ -97,8 +97,9 @@ class LunarTrainer:
         pos_loss = self.criterion(pos_pred, pos_target)
         vel_loss = self.criterion(vel_pred, vel_target)
         
-        # Weight position more heavily than velocity
-        total_loss = pos_loss + 0.1 * vel_loss
+        # Weight velocity more heavily than position
+        #TODO: Adjust the weights based on specific requirements
+        total_loss = pos_loss + 0.1*vel_loss
         
         return {
             'total_loss': total_loss,
@@ -106,7 +107,8 @@ class LunarTrainer:
             'velocity_loss': vel_loss
         }
     
-    def compute_metrics(self, predictions: torch.Tensor, targets: torch.Tensor) -> Dict:
+    @staticmethod
+    def compute_metrics(predictions: torch.Tensor, targets: torch.Tensor) -> Dict:
         """
         Compute pose estimation metrics
         """
@@ -123,12 +125,19 @@ class LunarTrainer:
             # Component-wise errors
             pos_rmse = torch.sqrt(torch.mean((pos_pred - pos_target) ** 2, dim=0))
             vel_rmse = torch.sqrt(torch.mean((vel_pred - vel_target) ** 2, dim=0))
+
+            # ELOPE metrics
+            square_vel_errors = (vel_pred[:,0] - vel_target[:,0]) ** 2 + \
+                                (vel_pred[:,1] - vel_target[:,1]) ** 2 + \
+                                (vel_pred[:,2] - vel_target[:,2]) ** 2
+            elope_score =  (1/len(predictions))*torch.sum( (torch.sqrt(square_vel_errors))/pos_target[:, 2])
             
             return {
                 'position_error': pos_error.item(),
                 'velocity_error': vel_error.item(),
                 'pos_rmse_xyz': pos_rmse.cpu().numpy(),
-                'vel_rmse_xyz': vel_rmse.cpu().numpy()
+                'vel_rmse_xyz': vel_rmse.cpu().numpy(),
+                'elope_score': elope_score.cpu().numpy()
             }
     
     def train_epoch(self) -> Dict:
@@ -254,7 +263,7 @@ class LunarTrainer:
             if val_metrics:
                 print(f"Val Loss: {val_metrics['total_loss']:.4f}")
                 print(f"Val Metrics - Pos Error: {val_metrics['position_error']:.2f}m, "
-                      f"Vel Error: {val_metrics['velocity_error']:.2f}m/s")
+                      f"Vel Error: {val_metrics['velocity_error']:.2f}m/s", f"elope_score: {val_metrics['elope_score']:.4f}")
             print("-" * 50)
 ###########     testing code    ###########
 if __name__ == "__main__":
