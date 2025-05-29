@@ -88,14 +88,14 @@ train_sequence_ids = [str(i).zfill(4) for i in range(28)]
 train_dataset = LunarDescentDataset(
     data_loader_instance=data_loader,
     sequence_ids=train_sequence_ids,
-    event_integration_window_us=100000, # 100ms window
+    event_integration_window_us=1e5, 
     imu_seq_len=5,
-    H=200, W=200, T=5,
-    sample_interval=5 # Adjust sampling frequency
+    H=200, W=200, T=10,
+    sample_interval=1 # Adjust sampling frequency
 )
 
 # Create a PyTorch DataLoader
-batch_size = 32 # Or whatever fits your GPU memory
+batch_size = 64 # Or whatever fits your GPU memory
 train_dataloader = TorchDataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4) # num_workers for parallel data loading
 train_model(model, train_dataloader, criterion, optimizer, scheduler, num_epochs, device)
 print("Training complete!")

@@ -215,7 +215,13 @@ class DataLoader:
             # Handle potential 1D array by converting it into a 2D array
             if len(events_array.shape) == 1:
                 events_array = np.array([[e[0], e[1], int(e[2]), e[3]] for e in events])
-
+        
+        # Ensure events_array is a 2D array
+        if events_array.shape[0] == 0:
+            print("No events found in the specified time window.")
+            # Return an empty tensor with the expected shape
+            return np.zeros((2, T, H, W), dtype=np.float32)
+        
         # Filter events based on the given time window (most recent events)
         if time_window > 0:
             t_max = end_time

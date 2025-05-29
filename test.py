@@ -5,17 +5,102 @@ import pandas as pd
 import os
 import matplotlib.pyplot as plt
 from typing import Dict, Tuple, Optional
+from sklearn.manifold import TSNE 
+import seaborn as sns 
 
 from elope_modules.dataloader import DataLoader
 from elope_modules.emmnet import create_model 
+
+def run_realtime_prediction_and_extract_features(
+    model: nn.Module,
+    data_loader_instance: DataLoader,
+    sequence_id: str,
+    event_integration_window_us: float = 1e5, # 100ms
+    imu_seq_len: int = 5,
+    H: int = 200, W: int = 200, T: int = 5,
+    prediction_interval_s: float = 0.05,
+    start_offset_s: float = 0.5,
+    device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]: # Added event_features_all
+    """
+    Runs "real-time" sequential prediction and extracts event features for analysis.
+    """
+    model.eval() # Set model to evaluation mode
+    model.to(device)
+
+    print(f"Loading test sequence {sequence_id}...")
+    data_loader_instance.load_sequence(sequence_id)
+    
+    predicted_states = []
+    ground_truth_states = []
+    prediction_times_s = []
+    event_features_all = [] # To store event embeddings
+
+    min_traj_time_s = data_loader_instance.timestamps_full[0]
+    
+    avg_imu_interval = np.mean(np.diff(data_loader_instance.timestamps_full[:imu_seq_len+5]))
+    required_min_offset_s = imu_seq_len * avg_imu_interval
+    if start_offset_s < required_min_offset_s:
+        print(f"Warning: start_offset_s ({start_offset_s:.4f}s) is less than the recommended "
+              f"minimum for IMU sequence length ({required_min_offset_s:.4f}s). Adjusting.")
+        start_offset_s = required_min_offset_s * 1.1
+
+    initial_prediction_time_s = min_traj_time_s + start_offset_s
+    start_inference_idx = np.searchsorted(data_loader_instance.timestamps_full, initial_prediction_time_s, side='left')
+    
+    if start_inference_idx >= len(data_loader_instance.timestamps_full):
+        print("No valid timestamps found for inference after initial offset.")
+        return np.array([]), np.array([]), np.array([]), np.array([])
+    
+    current_t_idx = start_inference_idx
+    
+    print(f"Starting predictions from timestamp {data_loader_instance.timestamps_full[current_t_idx]:.4f}s")
+    
+    while current_t_idx < len(data_loader_instance.timestamps_full):
+        t_current_s = data_loader_instance.timestamps_full[current_t_idx]
+        
+        data_point = data_loader_instance.get_data_at_time(
+            t_current_s,
+            event_integration_window_us=event_integration_window_us,
+            imu_seq_len=imu_seq_len,
+            H=H, W=W, T=T
+        )
+
+        if data_point is None:
+            print(f"Skipping prediction at {t_current_s:.4f}s due to insufficient data.")
+            current_t_idx += 1
+            continue
+        
+        event_t = data_point['events_tensor'].unsqueeze(0).to(device)
+        imu_s = data_point['imu_sequence'].unsqueeze(0).to(device)
+        range_s = data_point['rangemeter_sequence'].unsqueeze(0).to(device)
+        gt_pv = data_point['ground_truth'].unsqueeze(0).to(device)
+
+        with torch.no_grad():
+            outputs = model(event_t, imu_s, range_s)
+            prediction = outputs['prediction']
+            event_features = outputs['event_features'] # Extract event features
+
+        predicted_states.append(prediction.cpu().numpy().squeeze())
+        ground_truth_states.append(gt_pv.cpu().numpy().squeeze())
+        prediction_times_s.append(t_current_s)
+        event_features_all.append(event_features.cpu().numpy().squeeze())
+
+        next_t_s = t_current_s + prediction_interval_s
+        current_t_idx = np.searchsorted(data_loader_instance.timestamps_full, next_t_s, side='left')
+        
+    print(f"Finished predictions for sequence {sequence_id}. Total predictions: {len(predicted_states)}")
+    
+    return np.array(predicted_states), np.array(ground_truth_states), \
+           np.array(prediction_times_s), np.array(event_features_all)
 
 def run_realtime_prediction(
     model: nn.Module,
     data_loader_instance: DataLoader,
     sequence_id: str,
     event_integration_window_us: float = 1e5, # 100ms
-    imu_seq_len: int = 50,
-    H: int = 200, W: int = 200, T: int = 10,
+    imu_seq_len: int = 5,
+    H: int = 200, W: int = 200, T: int = 5,
     prediction_interval_s: float = 0.05, # How often to make a prediction (e.g., every 50ms)
     start_offset_s: float = 0.5, # Time to wait before first prediction (to fill LSTM buffers)
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -134,13 +219,176 @@ def run_realtime_prediction(
     
     return np.array(predicted_states), np.array(ground_truth_states), np.array(prediction_times_s)
 
+def visualize_activation_maps(
+    model: nn.Module,
+    data_point: Dict[str, torch.Tensor],
+    layer_name: str,
+    feature_map_idx: int = 0, # Index of the feature map (channel) to plot
+    device: torch.device = torch.device("cpu")
+):
+    """
+    Visualizes the activation maps (feature maps) of a specified Conv3d layer
+    for a given input event tensor.
+
+    Args:
+        model (nn.Module): The trained model.
+        data_point (Dict[str, torch.Tensor]): A single data point from the DataLoader,
+                                               containing 'events_tensor'.
+        layer_name (str): The name of the attribute in the model that holds the Conv3d layer.
+                          e.g., 'initial_block.0', 'res_block1.conv1'.
+        num_maps_to_plot (int): How many feature maps (channels) to visualize from the layer.
+        device (torch.device): The device the model is on.
+    """
+    
+    # Get the specific layer using a forward hook
+    activations = None
+    def hook_fn(module, input, output):
+        nonlocal activations # Allow modification of activations variable
+        activations = output.cpu().numpy() # Store output and move to CPU
+
+    # Register the hook to the specified layer
+    try:
+        parts = layer_name.split('.')
+        target_layer = model.event_encoder # Start from event_encoder
+        for part in parts:
+            if part.isdigit():
+                target_layer = target_layer[int(part)]
+            else:
+                target_layer = getattr(target_layer, part)
+        
+        # Ensure it's a convolutional layer whose output we want to capture
+        if not isinstance(target_layer, (nn.Conv3d, nn.ReLU, nn.BatchNorm3d, nn.MaxPool3d)):
+             print(f"Warning: Layer '{layer_name}' is not a typical processing layer. "
+                   f"Hook might not capture expected activations. Found: {type(target_layer)}")
+        
+        hook = target_layer.register_forward_hook(hook_fn)
+
+    except AttributeError:
+        print(f"Error: Layer '{layer_name}' not found in the EventEncoder of the model.")
+        return
+
+    # Prepare input for inference
+    event_t = data_point['events_tensor'].unsqueeze(0).to(device) # Add batch dim
+
+    # Perform a forward pass to trigger the hook
+    model.eval() # Ensure model is in eval mode
+    with torch.no_grad():
+        # We only need the forward pass through the relevant part,
+        # but calling the full model is simplest for hook to trigger.
+        _ = model(event_t, 
+                  data_point['imu_sequence'].unsqueeze(0).to(device),
+                  data_point['rangemeter_sequence'].unsqueeze(0).to(device))
+
+    # Remove the hook after use to prevent memory leaks
+    hook.remove()
+
+    if activations is None:
+        print(f"Could not retrieve activations for layer '{layer_name}'.")
+        return
+
+    # --- Prepare Input Event Data for Plotting ---
+    # Input event tensor: (Batch, C, T, H, W) -> (1, 2, T, H, W)
+    input_events_cpu = event_t[0].cpu().numpy() # Remove batch dim (2, T, H, W)
+    input_t_bins = input_events_cpu.shape[1] # T from input
+    input_h, input_w = input_events_cpu.shape[2], input_events_cpu.shape[3]
+
+    # Option 1: Sum ON and OFF events for a combined visualization
+    # You might want to abs() or just sum, depending on how you encoded polarity
+    # Assuming channel 0 is ON, channel 1 is OFF (or vice versa),
+    # a simple sum might cancel out, so let's try sum of absolute values or sum if positive events are 1 and negative are -1.
+    # For now, let's sum them as is, assuming event accumulation results in meaningful values.
+    # If events are +1 and -1, then summing works like event count difference.
+    input_event_frames = input_events_cpu[0, :, :, :] + input_events_cpu[1, :, :, :] # Sum ON and OFF channels
+    # input_event_frames will be (T, H, W)
+
+    # --- Prepare Activation Map Data for Plotting ---
+    # Activations shape: (Batch, Channels, Temporal_Depth_prime, Height_prime, Width_prime)
+    num_output_channels, act_t_depth, act_h, act_w = activations[0].shape
+    
+    if feature_map_idx >= num_output_channels or feature_map_idx < 0:
+        print(f"Error: feature_map_idx {feature_map_idx} is out of bounds for "
+              f"layer '{layer_name}' which has {num_output_channels} channels.")
+        return
+
+    # Select the specific feature map (channel) to plot
+    selected_activation_map = activations[0, feature_map_idx, :, :, :] # (Temporal_Depth_prime, Height_prime, Width_prime)
+
+    # --- Plotting ---
+    # Number of temporal slices for input and activation might be different
+    num_temporal_slices = max(input_t_bins, act_t_depth)
+
+    fig, axes = plt.subplots(2, num_temporal_slices, figsize=(2.5 * num_temporal_slices, 5)) # 2 rows: Input, Activation
+
+    # Ensure axes is always a 2D array for consistent indexing
+    if num_temporal_slices == 1:
+        axes = np.array([[axes[0]], [axes[1]]])
+    elif axes.ndim == 1: # For subplots(2, N) where N=1, axes is 1D array of 2 elements
+        axes = axes.reshape(2, -1)
+
+
+    # Row 1: Input Integrated Event Frames
+    for k in range(input_t_bins):
+        ax = axes[0, k]
+        frame_slice = input_event_frames[k, :, :]
+        
+        # Normalize for visualization. Use a divergent colormap for signed event values.
+        max_abs_val = np.max(np.abs(frame_slice))
+        if max_abs_val > 1e-6:
+            im = ax.imshow(frame_slice, cmap='RdBu', vmin=-max_abs_val, vmax=max_abs_val)
+        else:
+            im = ax.imshow(frame_slice, cmap='gray', vmin=0, vmax=1) # If all zeros, show as black
+
+        ax.axis('on')
+        if k == 0:
+            ax.set_title(f'Input (T={k})', fontsize=9)
+            ax.text(-0.5, 0.5, 'Input Events', transform=ax.transAxes,
+                    fontsize=10, va='center', ha='right')
+        else:
+            ax.set_title(f'T={k}', fontsize=9)
+    
+    # Fill remaining columns if activation maps have more temporal slices
+    for k in range(input_t_bins, num_temporal_slices):
+        axes[0, k].axis('on') # Hide unused axes
+
+    # Row 2: Selected Activation Map Slices
+    for k in range(act_t_depth):
+        ax = axes[1, k]
+        map_slice = selected_activation_map[k, :, :]
+        
+        # Normalize for visualization. Activations are typically non-negative after ReLU.
+        min_val = np.min(map_slice)
+        max_val = np.max(map_slice)
+        if max_val - min_val > 1e-6:
+            norm_map_slice = (map_slice - min_val) / (max_val - min_val)
+        else:
+            norm_map_slice = np.zeros_like(map_slice)
+
+        im = ax.imshow(norm_map_slice, cmap='viridis', vmin=0, vmax=1)
+        ax.axis('on')
+        if k == 0:
+            ax.set_title(f'Activation (T\'={k})', fontsize=9)
+            ax.text(-0.5, 0.5, f'Map {feature_map_idx}', transform=ax.transAxes,
+                    fontsize=10, va='center', ha='right')
+        else:
+            ax.set_title(f'T\'={k}', fontsize=9)
+
+    # Fill remaining columns if input has more temporal slices
+    for k in range(act_t_depth, num_temporal_slices):
+        axes[1, k].axis('off') # Hide unused axes
+
+
+    plt.suptitle(f'Input Events vs. Activation Map (Layer: {layer_name}, Map Index: {feature_map_idx})', fontsize=14, y=1.05)
+    plt.tight_layout(rect=[0.02, 0.03, 1, 0.98])
+    plt.savefig(f"input_vs_activation_{layer_name.replace('.', '_')}_map{feature_map_idx}_{TEST_SEQUENCE_ID}.png", dpi=300)
+    
+
 # --- Main execution block for testing ---
 if __name__ == "__main__":
     # --- Configuration ---
     DATAPATH = './elope_data' # Adjust as needed
-    MODEL_PATH = 'checkpoints/model_epoch_50.pth' # Path to your trained model weights
+    MODEL_PATH = 'best_velocity_estimator_model.pth' # Path to your trained model weights
     TEST_SEQUENCE_ID = '0020' # A test sequence not used in training (e.g., the first test trajectory)
-    
+    EXTRACT_INTERMEDIATE_FEATURES = False # Set to True if you want to extract event features
     USE_ATTENTION = True # Must match how your trained model was created
     
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -161,18 +409,73 @@ if __name__ == "__main__":
         # sys.exit(1)
 
     # --- 3. Run Real-Time Prediction ---
-    print("\nStarting real-time prediction simulation...")
-    predicted_states, ground_truth_states, prediction_times = run_realtime_prediction(
-        model=model,
-        data_loader_instance=data_loader,
-        sequence_id=TEST_SEQUENCE_ID,
-        event_integration_window_us=100000, # Same as training
-        imu_seq_len=5, # Same as training
-        H=200, W=200, T=5, # Same as training
-        prediction_interval_s=0.05, # Make a prediction every 50ms
-        start_offset_s=0.5, # Ensure at least 0.5s of data for LSTM warm-up
-        device=DEVICE
-    )
+
+    if EXTRACT_INTERMEDIATE_FEATURES:
+        print("\nStarting real-time prediction and feature extraction simulation...")
+        predicted_states, ground_truth_states, prediction_times, event_features = \
+        run_realtime_prediction_and_extract_features(
+            model=model,
+            data_loader_instance=data_loader,
+            sequence_id=TEST_SEQUENCE_ID,
+            event_integration_window_us=100000,
+            imu_seq_len=5,
+            H=200, W=200, T=5,
+            prediction_interval_s=0.05,
+            start_offset_s=0.5,
+            device=DEVICE
+            )
+        
+        print("\nVisualizing Event Feature Embeddings with t-SNE...")
+
+        velocity_magnitudes = np.linalg.norm(ground_truth_states[:, 3:6], axis=1)
+
+        if len(event_features) < 30:
+            print(f"Not enough event features ({len(event_features)}) for t-SNE visualization. Need at least 30.")
+        else:
+            perplexity_val = min(30, max(5, int(len(event_features) * 0.1)))
+            tsne = TSNE(n_components=2, random_state=42, perplexity=perplexity_val, learning_rate='auto', init='random')
+            event_features_2d = tsne.fit_transform(event_features)
+
+            plt.figure(figsize=(10, 8))
+            
+            # Capture the seaborn Axes object
+            ax = sns.scatterplot(
+                x=event_features_2d[:, 0], y=event_features_2d[:, 1],
+                hue=velocity_magnitudes,
+                palette="viridis", # Changed to string, seaborn will create the colormap internally
+                s=50, alpha=0.8,
+                legend='full'
+            )
+            
+            # Get the mappable object from the Axes for the colorbar
+            # This is typically the first child of type ScalarMappable (or related)
+            norm = plt.Normalize(vmin=velocity_magnitudes.min(), vmax=velocity_magnitudes.max())
+            sm = plt.cm.ScalarMappable(norm=norm, cmap="viridis") # Create a ScalarMappable explicitly
+            sm.set_array([]) # Needs a dummy array to avoid a warning
+
+            plt.colorbar(sm, ax=ax, label='Ground Truth Velocity Magnitude (m/s)') # Pass the mappable and the axes
+            
+            plt.title(f't-SNE Visualization of Event Features for Sequence {TEST_SEQUENCE_ID}')
+            plt.xlabel('t-SNE Component 1')
+            plt.ylabel('t-SNE Component 2')
+            plt.grid(True)
+            plt.savefig(f"event_features_tsne_{TEST_SEQUENCE_ID}.png", dpi=300)
+            plt.show()
+
+            print("t-SNE plot saved.")
+    else:
+        print("\nStarting real-time prediction simulation...")
+        predicted_states, ground_truth_states, prediction_times = run_realtime_prediction(
+            model=model,
+            data_loader_instance=data_loader,
+            sequence_id=TEST_SEQUENCE_ID,
+            event_integration_window_us=1e5, # Same as training
+            imu_seq_len=5, # Same as training
+            H=200, W=200, T=10, # Same as training
+            prediction_interval_s=0.01, # Make a prediction every 50ms
+            start_offset_s=0.5, # Ensure at least 0.5s of data for LSTM warm-up
+            device=DEVICE
+        )
 
     if len(predicted_states) > 0:
         print("\nPrediction Results:")
@@ -222,7 +525,50 @@ if __name__ == "__main__":
         plt.suptitle(f'6-DOF State Prediction vs. Ground Truth for Sequence {TEST_SEQUENCE_ID}', fontsize=16, y=1.02) # Add a main title
         plt.tight_layout(rect=[0, 0.03, 1, 0.98]) # Adjust layout to make space for suptitle
         plt.savefig(f"lunar_descent_predictions_{TEST_SEQUENCE_ID}.png", dpi=300) # Save with sequence ID in filename and higher DPI
-
-        # You can add more plots for X, Y, Vx, Vy if needed.
     else:
         print("No predictions were made. Check sequence ID, data path, or time offsets.")
+
+    # --- Add Activation Map Visualization Here ---
+    print("\nAttempting to visualize activation maps.")
+    # You need a single data point to feed into the network for activations.
+    # Let's take one from the beginning of the prediction sequence.
+    # Make sure you have at least one prediction point
+    if len(prediction_times) > 0:
+        # Get one data point from the data loader at a specific time
+        # This will be the first valid prediction time
+        first_prediction_time_s = prediction_times[0]
+        sample_data_point = data_loader.get_data_at_time(
+            first_prediction_time_s,
+            event_integration_window_us=100000,
+            imu_seq_len=5,
+            H=200, W=200, T=5
+        )
+        
+        if sample_data_point:
+            # Example: Visualize activations from the output of the first ResNet3DBlock (after conv1 and ReLU)
+            # The name refers to the layer within your model where you want to hook.
+            # In your EventEncoder, the `res_block1` is a ResNet3DBlock.
+            # If you want the activation *after* the first ReLU in `res_block1`:
+            def print_model_layers(model: nn.Module):
+                """
+                Prints all named modules (layers) in a PyTorch model and their types.
+                This helps in identifying the correct layer_name for hooks or access.
+                """
+                print("\n--- Model Layer Names and Types ---")
+                for name, module in model.named_modules():
+                    # Filter out the top-level module itself and potentially empty Sequential modules
+                    if name: # Only print non-empty names
+                        print(f"Name: {name:<50} Type: {type(module)}")
+                print("-----------------------------------\n")
+
+            print_model_layers(model)
+            visualize_activation_maps(model, sample_data_point, 'layer1.1.conv1', feature_map_idx=3, device=DEVICE)
+            # Or the activation *after* the initial block's MaxPool3d:
+            # visualize_activation_maps(model, sample_data_point, 'event_encoder.initial_block.3', num_maps_to_plot=8, device=DEVICE) # Index 3 is MaxPool3d if initial_block is Sequential
+            # Or the output of an early convolution (e.g., the first one in res_block1):
+            # visualize_activation_maps(model, sample_data_point, 'event_encoder.res_block1.conv1', num_maps_to_plot=8, device=DEVICE)
+
+        else:
+            print("Could not retrieve a sample data point for activation visualization.")
+    else:
+        print("No predictions were made, so no sample data point available for activation visualization.")
