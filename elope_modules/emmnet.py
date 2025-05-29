@@ -292,6 +292,15 @@ def create_model(use_attention: bool = False, device: str = 'cpu') -> MultiModal
     model = MultiModalVelocityEstimator(use_attention=use_attention)
     return model.to(device)
 
+
+
+
+
+
+
+
+
+
 ###########     testing code    ###########
 if __name__ == "__main__":
     loader = DataLoader("./elope_data")

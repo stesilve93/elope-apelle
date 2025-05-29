@@ -4,3 +4,4 @@
 *.zip
 *.pth
 *.png
+.vscode*

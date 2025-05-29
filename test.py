@@ -386,7 +386,7 @@ def visualize_activation_maps(
 if __name__ == "__main__":
     # --- Configuration ---
     DATAPATH = './elope_data' # Adjust as needed
-    MODEL_PATH = 'best_velocity_estimator_model.pth' # Path to your trained model weights
+    MODEL_PATH = 'best_lunar_pose_model.pth' # Path to your trained model weights
     TEST_SEQUENCE_ID = '0020' # A test sequence not used in training (e.g., the first test trajectory)
     EXTRACT_INTERMEDIATE_FEATURES = False # Set to True if you want to extract event features
     USE_ATTENTION = True # Must match how your trained model was created
@@ -401,7 +401,7 @@ if __name__ == "__main__":
     # --- 2. Load Trained Model Weights ---
     if os.path.exists(MODEL_PATH):
         print(f"Loading model weights from {MODEL_PATH}")
-        model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
+        model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE), strict=False)
     else:
         print(f"Warning: Trained model weights not found at {MODEL_PATH}. Using randomly initialized model.")
         print("Please train your model first or provide the correct path to weights.")
