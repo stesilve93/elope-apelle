@@ -20,7 +20,7 @@ class DataLoader:
         self.trajectory_full = None
         self.rangemeter_full = None
     
-    def load_sequence(self, sequence_id: str = '0000') -> Dict:
+    def load_sequence(self, sequence_id: str = '0000', source: str = "train") -> None:
         """
         Load a single sequence from the dataset
         
@@ -41,7 +41,7 @@ class DataLoader:
             - trajectory: Trajectory array [x, y, z, vx, vy, vz]
             - rangemeter: Rangemeter array [t, range], or None if not available
         """
-        fn = os.path.join(self.datapath, 'train', f'{sequence_id}.npz')
+        fn = os.path.join(self.datapath, source, f'{sequence_id}.npz')
         
         if not os.path.exists(fn):
             raise FileNotFoundError(f"Dataset file not found: {fn}")
@@ -173,6 +173,7 @@ class DataLoader:
         # --- Ground Truth ---
         # Ground truth is position and velocity at actual_t_current
         ground_truth = self.trajectory_full[traj_idx, 0:6] # x,y,z,vx,vy,vz
+        print(f"Ground truth at t_current {actual_t_current:.4f}s: {ground_truth}")
 
         return {
             'events_tensor': torch.from_numpy(events_tensor),

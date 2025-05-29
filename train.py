@@ -11,10 +11,6 @@ from elope_modules.elopeDataset import LunarDescentDataset
 from elope_modules.dataloader import DataLoader
 from torch.utils.data import Dataset, DataLoader as TorchDataLoader
 
-
-# Assuming your model is defined in `your_model_file.py`
-# from your_model_file import create_model
-
 # --- Device Configuration ---
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
@@ -31,10 +27,12 @@ optimizer = optim.Adam(model.parameters(), lr=1e-4) # Adam optimizer is a good d
 scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
 
 # --- Training Parameters ---
-num_epochs = 50 # Adjust as needed
+num_epochs = 500 # Adjust as needed
 
 def train_model(model, train_loader, criterion, optimizer, scheduler, num_epochs, device):
     model.train() # Set model to training mode
+    best_epoch_loss = float('inf') # Initialize best loss for early stopping
+
     for epoch in range(num_epochs):
         running_loss = 0.0
         for i, (event_t, imu_s, range_s, gt_pv) in enumerate(train_loader):
@@ -69,17 +67,21 @@ def train_model(model, train_loader, criterion, optimizer, scheduler, num_epochs
 
         # Step the learning rate scheduler
         scheduler.step(epoch_loss)
+        if epoch_loss < best_epoch_loss:
+            best_epoch_loss = epoch_loss
+            print(f"New best loss: {best_epoch_loss:.4f}. Saving model...")
+            # Save the model state if it improves
+            torch.save(model.state_dict(), "best_velocity_estimator_model.pth")
+        else:
+            print(f"No improvement in loss. Current best: {best_epoch_loss:.4f}")
 
-        # You might want to save the model checkpoints
-        # torch.save(model.state_dict(), f"model_epoch_{epoch+1}.pth")
 
 # --- Start Training ---
 print("Starting training...")
 datapath = './elope_data' # Adjust as needed
 data_loader = DataLoader(datapath=datapath)
 
-# Generate a list of your 40 train trajectory IDs
-# Assuming they are '0000.npz' to '0039.npz'
+# Generate a list of training sequence IDs
 train_sequence_ids = [str(i).zfill(4) for i in range(28)]
 
 # Create the dataset
@@ -87,13 +89,13 @@ train_dataset = LunarDescentDataset(
     data_loader_instance=data_loader,
     sequence_ids=train_sequence_ids,
     event_integration_window_us=100000, # 100ms window
-    imu_seq_len=50,
-    H=200, W=200, T=10,
+    imu_seq_len=5,
+    H=200, W=200, T=5,
     sample_interval=5 # Adjust sampling frequency
 )
 
 # Create a PyTorch DataLoader
-batch_size = 4 # Or whatever fits your GPU memory
+batch_size = 32 # Or whatever fits your GPU memory
 train_dataloader = TorchDataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4) # num_workers for parallel data loading
 train_model(model, train_dataloader, criterion, optimizer, scheduler, num_epochs, device)
 print("Training complete!")

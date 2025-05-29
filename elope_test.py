@@ -26,7 +26,7 @@ def run_lunar_descent_pipeline():
     
     try:
         events, timestamps, trajectory, rangemeter = \
-            DataLoader().load_sequence(sequence_id='0000')
+            DataLoader().load_sequence(sequence_id='0000', source="train")
         
         # Initialize and run pipeline
         pipeline = LunarDescentPipeline(use_gpu=True, acc_time=1e5)  # Enable GPU if available

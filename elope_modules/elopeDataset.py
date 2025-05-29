@@ -35,7 +35,7 @@ class LunarDescentDataset(Dataset):
         for seq_id in sequence_ids:
             print(f"Loading sequence {seq_id}...")
             # Load the full sequence data into the DataLoader instance
-            self.data_loader.load_sequence(seq_id)
+            self.data_loader.load_sequence(seq_id, source="train")
 
             # Generate samples from this loaded sequence
             # Iterate through timestamps from the loaded trajectory

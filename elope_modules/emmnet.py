@@ -295,7 +295,7 @@ def create_model(use_attention: bool = False, device: str = 'cpu') -> MultiModal
 ###########     testing code    ###########
 if __name__ == "__main__":
     loader = DataLoader("./elope_data")
-    loader.load_sequence(sequence_id='0000')
+    loader.load_sequence(sequence_id='0000', source="train")
     
     # Preprocess
     print("\nPreprocessing data...")
