@@ -9,7 +9,7 @@ from sklearn.manifold import TSNE
 import seaborn as sns 
 
 from elope_modules.dataloader import DataLoader
-from elope_modules.emmnet import create_model 
+from elope_modules.emmnetSpatial import create_model 
 from elope_modules.elopeDataset import LunarTrainer as lt
 
 def run_realtime_prediction_and_extract_features(

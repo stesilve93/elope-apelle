@@ -31,9 +31,9 @@ class SpatialRangemeterFusion(nn.Module):
         Create spatial depth maps from rangemeter measurements
         
         Args:
-            depth_values: (B, T, 1) - rangemeter measurements
+            depth_values: (B, seq_len, 1) - rangemeter measurements
             batch_size: batch size
-            T: temporal dimension
+            T: temporal dimension (should match event tensor)
         
         Returns:
             depth_maps: (B, T, H, W) - spatial depth representations
@@ -54,10 +54,23 @@ class SpatialRangemeterFusion(nn.Module):
         weights = torch.exp(-distances**2 / (2 * sigma**2))
         weights = weights.unsqueeze(0).unsqueeze(0)  # (1, 1, H, W)
         
+        # Handle temporal dimension mismatch by interpolating rangemeter data
+        B, seq_len, _ = depth_values.shape
+        if seq_len != T:
+            # Interpolate rangemeter sequence to match event tensor temporal dimension
+            depth_values_interp = F.interpolate(
+                depth_values.transpose(1, 2),  # (B, 1, seq_len)
+                size=T, 
+                mode='linear', 
+                align_corners=True
+            ).transpose(1, 2)  # (B, T, 1)
+        else:
+            depth_values_interp = depth_values
+        
         # Broadcast depth values across spatial dimensions
         depth_maps = []
         for t in range(T):
-            depth_t = depth_values[:, t, :]  # (B, 1)
+            depth_t = depth_values_interp[:, t, :]  # (B, 1)
             # Reshape and broadcast: (B, 1) -> (B, 1, H, W)
             depth_spatial = depth_t.unsqueeze(-1).unsqueeze(-1) * weights
             depth_maps.append(depth_spatial)
@@ -66,35 +79,46 @@ class SpatialRangemeterFusion(nn.Module):
         depth_maps = torch.stack(depth_maps, dim=1)
         return depth_maps
     
-    def forward(self, depth_sequence):
+    def forward(self, depth_sequence, target_temporal_dim):
         """
         Args:
             depth_sequence: (B, seq_len, 1) - rangemeter measurements
+            target_temporal_dim: int - temporal dimension to match (from event tensor)
         
         Returns:
             depth_features: (B, event_channels, T, H, W) - spatial depth features
         """
         B, seq_len, _ = depth_sequence.shape
+        T = target_temporal_dim  # Use the target temporal dimension of event time bins
         
-        # Create spatial depth maps
-        depth_maps = self.create_depth_map(depth_sequence, B, seq_len)  # (B, T, H, W)
+        # Create spatial depth maps with matching temporal dimension
+        depth_maps = self.create_depth_map(depth_sequence, B, T)  # (B, T, H, W)
         
         # Apply spatial attention
-        B, T, H, W = depth_maps.shape
-        depth_flat = depth_maps.view(B*T, 1, H, W)
+        depth_flat = depth_maps.view(B*T, 1, self.H, self.W)
         attention_weights = torch.sigmoid(self.spatial_attention(depth_flat))
         depth_attended = depth_flat * attention_weights
-        depth_attended = depth_attended.view(B, T, H, W)
+        depth_attended = depth_attended.view(B, T, self.H, self.W)
         
-        # Embed depth values temporally
-        depth_embedded = self.depth_embed(depth_sequence)  # (B, T, 64)
+        # Embed depth values temporally (interpolate first if needed)
+        if seq_len != T:
+            depth_sequence_interp = F.interpolate(
+                depth_sequence.transpose(1, 2),  # (B, 1, seq_len)
+                size=T,
+                mode='linear',
+                align_corners=True
+            ).transpose(1, 2)  # (B, T, 1)
+        else:
+            depth_sequence_interp = depth_sequence
+            
+        depth_embedded = self.depth_embed(depth_sequence_interp)  # (B, T, 64)
         
         # Broadcast temporal features to spatial dimensions
         depth_features_list = []
         for t in range(T):
             temp_feat = depth_embedded[:, t, :]  # (B, 64)
             temp_feat = temp_feat.unsqueeze(-1).unsqueeze(-1)  # (B, 64, 1, 1)
-            temp_feat = temp_feat.expand(-1, -1, H, W)  # (B, 64, H, W)
+            temp_feat = temp_feat.expand(-1, -1, self.H, self.W)  # (B, 64, H, W)
             
             # Combine with spatial depth map
             spatial_depth = depth_attended[:, t:t+1, :, :]  # (B, 1, H, W)
@@ -157,8 +181,11 @@ class EnhancedEventEncoder(nn.Module):
         Returns:
             Enhanced event features with geometric depth information
         """
+        # Extract target temporal dimension from event tensor
+        event_time_bins = event_tensor.shape[2]
+
         # Get spatial depth features
-        depth_features = self.rangemeter_fusion(rangemeter_sequence)  # (B, C, T, H, W)
+        depth_features = self.rangemeter_fusion(rangemeter_sequence, event_time_bins)  # (B, C, T, H, W)
         
         # Fuse with event tensor
         # Option 1: Concatenation along channel dimension
@@ -204,15 +231,7 @@ class EnhancedMultiModalVelocityEstimator(nn.Module):
         from elope_modules.emmnet import IMUEncoder
         self.imu_encoder = IMUEncoder(output_dim=imu_output_dim)
         
-        # Fusion strategy (simplified since rangemeter is now fused with events)
-        self.use_attention = use_attention
-        if use_attention:
-            from elope_modules.emmnet import CrossModalAttention
-            self.fusion = CrossModalAttention(event_output_dim, imu_output_dim, 
-                                            0, hidden_dim=128)  # No separate rangemeter
-            fusion_input_dim = 128
-        else:
-            fusion_input_dim = event_output_dim + imu_output_dim
+        fusion_input_dim = event_output_dim + imu_output_dim
         
         # Final regression head
         self.regressor = nn.Sequential(
@@ -231,15 +250,9 @@ class EnhancedMultiModalVelocityEstimator(nn.Module):
         # Extract enhanced event features (with rangemeter fusion)
         event_feat = self.event_encoder(event_tensor, range_tensor)
         imu_feat = self.imu_encoder(imu_tensor)
-        
-        # Fusion (now just event + IMU since rangemeter is pre-fused)
-        if self.use_attention:
-            # Create dummy rangemeter features for compatibility
-            dummy_range_feat = torch.zeros(event_feat.shape[0], 1, device=event_feat.device)
-            fused_feat, attention_weights = self.fusion(event_feat, imu_feat, dummy_range_feat)
-        else:
-            fused_feat = torch.cat([event_feat, imu_feat], dim=1)
-            attention_weights = None
+    
+        fused_feat = torch.cat([event_feat, imu_feat], dim=1)
+        attention_weights = None
         
         # Final prediction
         output = self.regressor(fused_feat)
@@ -252,7 +265,7 @@ class EnhancedMultiModalVelocityEstimator(nn.Module):
         }
 
 
-def create_enhanced_model(use_attention=False, device='cpu'):
+def create_model(use_attention=False, device='cpu'):
     """Factory function for enhanced model"""
     model = EnhancedMultiModalVelocityEstimator(use_attention=use_attention)
     return model.to(device)
