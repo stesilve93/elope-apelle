@@ -14,9 +14,25 @@ class LunarDescentDataset(Dataset):
                  event_integration_window_us: float = 1e5,
                  imu_seq_len: int = 50,
                  H: int = 200, W: int = 200, T: int = 10,
-                 sample_interval: int = 10):
+                 sample_interval: int = 10,
+                 velocity_only: bool = True):
         """
         Custom PyTorch Dataset for lunar descent data.
+
+        This dataset class is responsible for generating samples from the lunar descent
+        dataset. It takes in a DataLoader instance which contains the dataset metadata,
+        and a list of sequence IDs to load. For each sequence, it loads the full sequence
+        data into the DataLoader instance, and then generates samples from this loaded
+        sequence.
+
+        Each sample is a dictionary containing the following keys:
+        - 'events_tensor': A tensor of shape (H, W, T) representing the event image.
+        - 'imu_sequence': A tensor of shape (seq_len, 6) representing the IMU sequence.
+        - 'rangemeter_sequence': A tensor of shape (seq_len, 2) representing the rangemeter sequence.
+        - 'ground_truth': A tensor of shape (7,) representing the ground truth state (x, y, z, vx, vy, vz, t).
+
+        The samples are stored in a list called `self.samples`, which is accessible
+        through the `__getitem__` method.
 
         Args:
             data_loader_instance (DataLoader): An instantiated DataLoader object.
@@ -34,6 +50,7 @@ class LunarDescentDataset(Dataset):
         self.H = H
         self.W = W
         self.T = T
+        self.velocity_only = velocity_only
 
         print("Preparing dataset samples...")
         for seq_id in sequence_ids:
@@ -64,17 +81,23 @@ class LunarDescentDataset(Dataset):
 
     def __getitem__(self, idx):
         # Return the pre-processed tensors and ground truth
-        sample = self.samples[idx]
-        return (sample['events_tensor'], sample['imu_sequence'],
-                sample['rangemeter_sequence'], sample['ground_truth'])
+        if self.velocity_only:
+            sample = self.samples[idx]
+            return (sample['events_tensor'], sample['imu_sequence'],
+                    sample['rangemeter_sequence'], sample['ground_truth'], sample['position_gt'])
+        else:
+            sample = self.samples[idx]
+            return (sample['events_tensor'], sample['imu_sequence'],
+                    sample['rangemeter_sequence'], sample['ground_truth'])
 
 
 class LunarTrainer:
-    def __init__(self, model, train_loader, val_loader=None, device='cuda'):
+    def __init__(self, model, train_loader, val_loader=None, device='cuda', velocity_only=True):
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.device = device
+        self.velocity_only = velocity_only
         
         # Loss and optimizer
         self.criterion = nn.MSELoss()
@@ -91,6 +114,17 @@ class LunarTrainer:
         """
         Compute weighted loss for position and velocity components
         """
+        if self.velocity_only:
+            # If only velocity is used, we only compute the loss for velocity
+            vel_pred = predictions[:, :3]
+            vel_target = targets[:, :3]
+            vel_loss = self.criterion(vel_pred, vel_target)
+            return {
+                'total_loss': vel_loss,
+                'position_loss': torch.tensor(0.0, device=self.device),
+                'velocity_loss': vel_loss
+            }
+        # If both position and velocity are used, compute both losses
         pos_pred, vel_pred = predictions[:, :3], predictions[:, 3:]
         pos_target, vel_target = targets[:, :3], targets[:, 3:]
         
@@ -108,37 +142,60 @@ class LunarTrainer:
         }
     
     @staticmethod
-    def compute_metrics(predictions: torch.Tensor, targets: torch.Tensor) -> Dict:
+    def compute_metrics(predictions: torch.Tensor, targets: torch.Tensor, velocity_only: bool, pos_gt: torch.Tensor) -> Dict:
         """
         Compute pose estimation metrics
         """
         with torch.no_grad():
-            pos_pred, vel_pred = predictions[:, :3], predictions[:, 3:]
-            pos_target, vel_target = targets[:, :3], targets[:, 3:]
-            
-            # Position error (L2 norm)
-            pos_error = torch.norm(pos_pred - pos_target, dim=1).mean()
-            
-            # Velocity error (L2 norm)
-            vel_error = torch.norm(vel_pred - vel_target, dim=1).mean()
-            
-            # Component-wise errors
-            pos_rmse = torch.sqrt(torch.mean((pos_pred - pos_target) ** 2, dim=0))
-            vel_rmse = torch.sqrt(torch.mean((vel_pred - vel_target) ** 2, dim=0))
+            if not velocity_only:
+                pos_pred, vel_pred = predictions[:, :3], predictions[:, 3:]
+                pos_target, vel_target = targets[:, :3], targets[:, 3:]
+                
+                # Position error (L2 norm)
+                pos_error = torch.norm(pos_pred - pos_target, dim=1).mean()
+                
+                # Velocity error (L2 norm)
+                vel_error = torch.norm(vel_pred - vel_target, dim=1).mean()
+                
+                # Component-wise errors
+                pos_rmse = torch.sqrt(torch.mean((pos_pred - pos_target) ** 2, dim=0))
+                vel_rmse = torch.sqrt(torch.mean((vel_pred - vel_target) ** 2, dim=0))
 
-            # ELOPE metrics
-            square_vel_errors = (vel_pred[:,0] - vel_target[:,0]) ** 2 + \
-                                (vel_pred[:,1] - vel_target[:,1]) ** 2 + \
-                                (vel_pred[:,2] - vel_target[:,2]) ** 2
-            elope_score =  (1/len(predictions))*torch.sum( (torch.sqrt(square_vel_errors))/pos_target[:, 2])
-            
-            return {
-                'position_error': pos_error.item(),
-                'velocity_error': vel_error.item(),
-                'pos_rmse_xyz': pos_rmse.cpu().numpy(),
-                'vel_rmse_xyz': vel_rmse.cpu().numpy(),
-                'elope_score': elope_score.cpu().numpy()
-            }
+                # ELOPE metrics
+                square_vel_errors = (vel_pred[:,0] - vel_target[:,0]) ** 2 + \
+                                    (vel_pred[:,1] - vel_target[:,1]) ** 2 + \
+                                    (vel_pred[:,2] - vel_target[:,2]) ** 2
+                elope_score =  (1/len(predictions))*torch.sum( (torch.sqrt(square_vel_errors))/pos_target[:, 2])
+                
+                return {
+                    'position_error': pos_error.item(),
+                    'velocity_error': vel_error.item(),
+                    'pos_rmse_xyz': pos_rmse.cpu().numpy(),
+                    'vel_rmse_xyz': vel_rmse.cpu().numpy(),
+                    'elope_score': elope_score.cpu().numpy()
+                }
+            else:
+                # Only velocity is used, compute metrics for velocity
+                vel_pred = predictions[:, :3]
+                vel_target = targets[:, :3]
+                
+                # Velocity error (L2 norm)
+                vel_error = torch.norm(vel_pred - vel_target, dim=1).mean()
+                
+                # Component-wise errors
+                vel_rmse = torch.sqrt(torch.mean((vel_pred - vel_target) ** 2, dim=0))
+
+                                # ELOPE metrics
+                square_vel_errors = (vel_pred[:,0] - vel_target[:,0]) ** 2 + \
+                                    (vel_pred[:,1] - vel_target[:,1]) ** 2 + \
+                                    (vel_pred[:,2] - vel_target[:,2]) ** 2
+                elope_score =  (1/len(predictions))*torch.sum( (torch.sqrt(square_vel_errors))/pos_gt[:, 2])
+                
+                return {
+                    'velocity_error': vel_error.item(),
+                    'vel_rmse_xyz': vel_rmse.cpu().numpy(),
+                    'elope_score': elope_score.cpu().numpy()
+                }
     
     def train_epoch(self) -> Dict:
         """Train for one epoch"""
@@ -148,7 +205,7 @@ class LunarTrainer:
         running_vel_loss = 0.0
         num_batches = 0
         
-        for i, (events, imu, rangemeter, targets) in enumerate(self.train_loader):
+        for i, (events, imu, rangemeter, targets, _) in enumerate(self.train_loader):
             events = events.to(self.device)
             imu = imu.to(self.device)
             rangemeter = rangemeter.to(self.device)
@@ -199,26 +256,49 @@ class LunarTrainer:
         all_targets = []
         
         with torch.no_grad():
-            for events, imu, rangemeter, targets in self.val_loader:
-                events = events.to(self.device)
-                imu = imu.to(self.device)
-                rangemeter = rangemeter.to(self.device)
-                targets = targets.to(self.device)
-                
-                outputs = self.model(events, imu, rangemeter)
-                predictions = outputs['prediction']
-                
-                # Compute loss
-                loss_dict = self.weighted_pose_loss(predictions, targets)
-                running_loss += loss_dict['total_loss'].item()
-                
-                all_predictions.append(predictions.cpu())
-                all_targets.append(targets.cpu())
+            if self.velocity_only:
+                all_posgt = []
+                for events, imu, rangemeter, targets, pos_gt in self.val_loader:
+                    events = events.to(self.device)
+                    imu = imu.to(self.device)
+                    rangemeter = rangemeter.to(self.device)
+                    targets = targets.to(self.device)
+                    
+                    outputs = self.model(events, imu, rangemeter)
+                    predictions = outputs['prediction']
+                    
+                    # Compute loss
+                    loss_dict = self.weighted_pose_loss(predictions, targets)
+                    running_loss += loss_dict['total_loss'].item()
+                    
+                    all_predictions.append(predictions.cpu())
+                    all_targets.append(targets.cpu())
+                    all_posgt.append(pos_gt.cpu())
+            else:
+                for events, imu, rangemeter, targets in self.val_loader:
+                    events = events.to(self.device)
+                    imu = imu.to(self.device)
+                    rangemeter = rangemeter.to(self.device)
+                    targets = targets.to(self.device)
+                    
+                    outputs = self.model(events, imu, rangemeter)
+                    predictions = outputs['prediction']
+                    
+                    # Compute loss
+                    loss_dict = self.weighted_pose_loss(predictions, targets)
+                    running_loss += loss_dict['total_loss'].item()
+                    
+                    all_predictions.append(predictions.cpu())
+                    all_targets.append(targets.cpu())
         
         # Compute overall metrics
         all_predictions = torch.cat(all_predictions, dim=0)
         all_targets = torch.cat(all_targets, dim=0)
-        metrics = self.compute_metrics(all_predictions, all_targets)
+        if self.velocity_only:
+            all_posgt = torch.cat(all_posgt, dim=0)
+            metrics = self.compute_metrics(all_predictions, all_targets, self.velocity_only, all_posgt)
+        else:
+            metrics = self.compute_metrics(all_predictions, all_targets, self.velocity_only, all_targets)
         
         val_loss = running_loss / len(self.val_loader)
         metrics['total_loss'] = val_loss
@@ -260,10 +340,13 @@ class LunarTrainer:
                   f"(Pos: {train_metrics['position_loss']:.4f}, "
                   f"Vel: {train_metrics['velocity_loss']:.4f})")
             
-            if val_metrics:
+            if val_metrics and not self.velocity_only:
                 print(f"Val Loss: {val_metrics['total_loss']:.4f}")
                 print(f"Val Metrics - Pos Error: {val_metrics['position_error']:.2f}m, "
                       f"Vel Error: {val_metrics['velocity_error']:.2f}m/s", f"elope_score: {val_metrics['elope_score']:.4f}")
+            else:
+                print(f"Val Loss: {val_loss:.4f}")
+                print(f"Val Metrics - Vel Error: {val_metrics['velocity_error']:.2f}m/s", f"elope_score: {val_metrics['elope_score']:.4f}")
             print("-" * 50)
 ###########     testing code    ###########
 if __name__ == "__main__":

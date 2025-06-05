@@ -9,7 +9,7 @@ from sklearn.manifold import TSNE
 import seaborn as sns 
 
 from elope_modules.dataloader import DataLoader
-from elope_modules.emmnetSpatial import create_model 
+from elope_modules.emmnetVel import create_model 
 from elope_modules.elopeDataset import LunarTrainer as lt
 
 def run_realtime_prediction_and_extract_features(
@@ -104,7 +104,8 @@ def run_realtime_prediction(
     H: int = 200, W: int = 200, T: int = 5,
     prediction_interval_s: float = 0.05, # How often to make a prediction (e.g., every 50ms)
     start_offset_s: float = 0.5, # Time to wait before first prediction (to fill LSTM buffers)
-    device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+    velocity_only: bool = True # If True, only predict velocity (vx,vy,vz)
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Runs "real-time" sequential prediction on a single test trajectory.
@@ -138,6 +139,8 @@ def run_realtime_prediction(
     predicted_states = []
     ground_truth_states = []
     prediction_times_s = []
+    if velocity_only:
+        position_states = []
 
     # Get the minimum timestamp from the trajectory to set an initial start time
     # This assumes trajectory timestamps are sorted and representative of the sequence
@@ -199,6 +202,8 @@ def run_realtime_prediction(
         imu_s = data_point['imu_sequence'].unsqueeze(0).to(device)
         range_s = data_point['rangemeter_sequence'].unsqueeze(0).to(device)
         gt_pv = data_point['ground_truth'].unsqueeze(0).to(device)
+        if velocity_only:
+            pos_gt = data_point['position_gt'].unsqueeze(0).to(device)
 
         with torch.no_grad(): # No gradient calculations during inference
             outputs = model(event_t, imu_s, range_s)
@@ -210,6 +215,8 @@ def run_realtime_prediction(
         print(f"Ground truth at {t_current_s:.4f}s: {gt_pv.cpu().numpy().squeeze()}")
         ground_truth_states.append(gt_pv.cpu().numpy().squeeze())
         prediction_times_s.append(t_current_s)
+        if velocity_only:
+            position_states.append(pos_gt.cpu().numpy().squeeze())
 
         # Move to the next prediction timestamp
         # Find the next timestamp in the trajectory that is at least `prediction_interval_s` later
@@ -217,8 +224,10 @@ def run_realtime_prediction(
         current_t_idx = np.searchsorted(data_loader_instance.timestamps_full, next_t_s, side='left')
         
     print(f"Finished predictions for sequence {sequence_id}. Total predictions: {len(predicted_states)}")
-    
-    return np.array(predicted_states), np.array(ground_truth_states), np.array(prediction_times_s)
+    if velocity_only:
+        return np.array(predicted_states), np.array(ground_truth_states), np.array(prediction_times_s), np.array(position_states)
+    else:
+        return np.array(predicted_states), np.array(ground_truth_states), np.array(prediction_times_s)
 
 def visualize_activation_maps(
     model: nn.Module,
@@ -388,15 +397,21 @@ if __name__ == "__main__":
     # --- Configuration ---
     DATAPATH = './elope_data' # Adjust as needed
     MODEL_PATH = 'best_lunar_pose_model_velocity.pth' # Path to your trained model weights
-    TEST_SEQUENCE_ID = '0020' # A test sequence not used in training (e.g., the first test trajectory)
+    TEST_SEQUENCE_ID = '0023' # A test sequence not used in training (e.g., the first test trajectory)
     EXTRACT_INTERMEDIATE_FEATURES = False # Set to True if you want to extract event features
     USE_ATTENTION = True # Must match how your trained model was created
+    VELOCITY_ONLY = True # Set to True for velocity-only training
+
+    INT_WINDOW_US = 1e5  # Integration window in microseconds
+    SEQ_LEN = 5  # Length of IMU sequence
+    H, W, T = 200, 200, 10  # Image dimensions and time steps
+    SAMPLE_INTERVAL = 1
     
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device for inference: {DEVICE}")
 
     # --- 1. Initialize DataLoader and Model ---
-    data_loader = DataLoader(datapath=DATAPATH)
+    data_loader = DataLoader(datapath=DATAPATH, velocity_only=VELOCITY_ONLY)
     model = create_model(use_attention=USE_ATTENTION, device=DEVICE)
 
     # --- 2. Load Trained Model Weights ---
@@ -466,22 +481,45 @@ if __name__ == "__main__":
             print("t-SNE plot saved.")
     else:
         print("\nStarting real-time prediction simulation...")
-        predicted_states, ground_truth_states, prediction_times = run_realtime_prediction(
-            model=model,
-            data_loader_instance=data_loader,
-            sequence_id=TEST_SEQUENCE_ID,
-            event_integration_window_us=1e5, # Same as training
-            imu_seq_len=5, # Same as training
-            H=200, W=200, T=10, # Same as training
-            prediction_interval_s=0.1, # Make a prediction every 50ms
-            start_offset_s=0.5, # Ensure at least 0.5s of data for LSTM warm-up
-            device=DEVICE
-        )
-    
-    test_metrics = lt.compute_metrics(torch.tensor(predicted_states), torch.tensor(ground_truth_states))
-    print(test_metrics)
-    print(f"Test Metrics - Pos Error: {test_metrics['position_error']:.2f}m, "
-                      f"Vel Error: {test_metrics['velocity_error']:.2f}m/s", f"elope_score: {test_metrics['elope_score']:.4f}")
+        if VELOCITY_ONLY:
+            predicted_states, ground_truth_states, prediction_times, pos_states = run_realtime_prediction(
+                model=model,
+                data_loader_instance=data_loader,
+                sequence_id=TEST_SEQUENCE_ID,
+                event_integration_window_us=INT_WINDOW_US, # Same as training
+                imu_seq_len=SEQ_LEN, # Same as training
+                H=H, W=W, T=T, # Same as training
+                prediction_interval_s=SAMPLE_INTERVAL, # Make a prediction every 50ms
+                start_offset_s=0.5, # Ensure at least 0.5s of data for LSTM warm-up
+                device=DEVICE,
+                velocity_only=VELOCITY_ONLY # Use the same setting as training
+            )
+
+            test_metrics = lt.compute_metrics(torch.tensor(predicted_states), torch.tensor(ground_truth_states), 
+                                              velocity_only=VELOCITY_ONLY, pos_gt=torch.tensor(pos_states))
+            
+            print(test_metrics)
+            print(f"Test Metrics - Vel Error: {test_metrics['velocity_error']:.2f}m/s", f"elope_score: {test_metrics['elope_score']:.4f}")
+        else:
+            predicted_states, ground_truth_states, prediction_times = run_realtime_prediction(
+                model=model,
+                data_loader_instance=data_loader,
+                sequence_id=TEST_SEQUENCE_ID,
+                event_integration_window_us=INT_WINDOW_US, # Same as training
+                imu_seq_len=SEQ_LEN, # Same as training
+                H=H, W=W, T=T, # Same as training
+                prediction_interval_s=SAMPLE_INTERVAL, # Make a prediction every 50ms
+                start_offset_s=0.5, # Ensure at least 0.5s of data for LSTM warm-up
+                device=DEVICE,
+                velocity_only=VELOCITY_ONLY # Use the same setting as training
+            )
+
+            test_metrics = lt.compute_metrics(torch.tensor(predicted_states), torch.tensor(ground_truth_states), 
+                                              velocity_only=VELOCITY_ONLY, pos_gt=torch.tensor(ground_truth_states))
+            print(test_metrics)
+            print(f"Test Metrics - Pos Error: {test_metrics['position_error']:.2f}m, "
+                    f"Vel Error: {test_metrics['velocity_error']:.2f}m/s", f"elope_score: {test_metrics['elope_score']:.4f}")
+
     if len(predicted_states) > 0:
         print("\nPrediction Results:")
         print(f"Total predictions: {len(predicted_states)}")
@@ -492,25 +530,37 @@ if __name__ == "__main__":
         mse_total = np.mean((predicted_states - ground_truth_states)**2)
         print(f"Overall Mean Squared Error on test sequence {TEST_SEQUENCE_ID}: {mse_total:.6f}")
 
-        # Calculate individual MSE for each component
-        component_labels = ['X (m)', 'Y (m)', 'Z (m)', 'Vx (m/s)', 'Vy (m/s)', 'Vz (m/s)']
-        for i, label in enumerate(component_labels):
-            mse_component = np.mean((predicted_states[:, i] - ground_truth_states[:, i])**2)
-            print(f"MSE for {label}: {mse_component:.6f}")
-
-        # --- Plotting All 6 DoF Components ---
-        # Create a 3x2 grid of subplots for position (x, y, z) and velocity (vx, vy, vz)
-        fig, axes = plt.subplots(3, 2, figsize=(15, 15)) # Increased figsize for better readability
-        axes = axes.flatten() # Flatten the 2D array of axes for easier iteration
-
-        plot_info = [
-            {'idx': 0, 'label': 'X', 'ylabel': 'Position (m)'},
-            {'idx': 1, 'label': 'Y', 'ylabel': 'Position (m)'},
-            {'idx': 2, 'label': 'Z', 'ylabel': 'Altitude (m)'},
-            {'idx': 3, 'label': 'Vx', 'ylabel': 'Velocity (m/s)'},
-            {'idx': 4, 'label': 'Vy', 'ylabel': 'Velocity (m/s)'},
-            {'idx': 5, 'label': 'Vz', 'ylabel': 'Velocity (m/s)'}
-        ]
+        if VELOCITY_ONLY:
+            # Calculate individual MSE for each component
+            component_labels = ['Vx (m/s)', 'Vy (m/s)', 'Vz (m/s)']
+            for i, label in enumerate(component_labels):
+                mse_component = np.mean((predicted_states[:, i] - ground_truth_states[:, i])**2)
+                print(f"MSE for {label}: {mse_component:.6f}")
+            # Create a 3x2 grid of subplots for position (x, y, z) and velocity (vx, vy, vz)
+            fig, axes = plt.subplots(1, 3, figsize=(15, 15)) # Increased figsize for better readability
+            axes = axes.flatten() # Flatten the 2D array of axes for easier iteration
+            plot_info = [
+                {'idx': 0, 'label': 'Vx', 'ylabel': 'Velocity (m/s)'},
+                {'idx': 1, 'label': 'Vy', 'ylabel': 'Velocity (m/s)'},
+                {'idx': 2, 'label': 'Vz', 'ylabel': 'Velocity (m/s)'}
+            ]
+        else:
+            # Calculate individual MSE for each component
+            component_labels = ['X (m)', 'Y (m)', 'Z (m)', 'Vx (m/s)', 'Vy (m/s)', 'Vz (m/s)']
+            for i, label in enumerate(component_labels):
+                mse_component = np.mean((predicted_states[:, i] - ground_truth_states[:, i])**2)
+                print(f"MSE for {label}: {mse_component:.6f}")
+            # Create a 3x2 grid of subplots for position (x, y, z) and velocity (vx, vy, vz)
+            fig, axes = plt.subplots(2, 3, figsize=(15, 15)) # Increased figsize for better readability
+            axes = axes.flatten() # Flatten the 2D array of axes for easier iteration
+            plot_info = [
+                {'idx': 0, 'label': 'X', 'ylabel': 'Position (m)'},
+                {'idx': 1, 'label': 'Y', 'ylabel': 'Position (m)'},
+                {'idx': 2, 'label': 'Z', 'ylabel': 'Altitude (m)'},
+                {'idx': 3, 'label': 'Vx', 'ylabel': 'Velocity (m/s)'},
+                {'idx': 4, 'label': 'Vy', 'ylabel': 'Velocity (m/s)'},
+                {'idx': 5, 'label': 'Vz', 'ylabel': 'Velocity (m/s)'}
+            ]
 
         for i, info in enumerate(plot_info):
             ax = axes[i]
@@ -544,9 +594,9 @@ if __name__ == "__main__":
         first_prediction_time_s = prediction_times[0]
         sample_data_point = data_loader.get_data_at_time(
             first_prediction_time_s,
-            event_integration_window_us=100000,
-            imu_seq_len=5,
-            H=200, W=200, T=5
+            event_integration_window_us=INT_WINDOW_US,
+            imu_seq_len=SEQ_LEN,
+            H=H, W=W, T=T
         )
         
         if sample_data_point:
@@ -566,12 +616,12 @@ if __name__ == "__main__":
                         print(f"Name: {name:<50} Type: {type(module)}")
                 print("-----------------------------------\n")
 
-            #print_model_layers(model)
+            print_model_layers(model)
             visualize_activation_maps(model, sample_data_point, 'layer1.1.conv1', feature_map_idx=3, device=DEVICE)
             # Or the activation *after* the initial block's MaxPool3d:
-            # visualize_activation_maps(model, sample_data_point, 'event_encoder.initial_block.3', num_maps_to_plot=8, device=DEVICE) # Index 3 is MaxPool3d if initial_block is Sequential
+            visualize_activation_maps(model, sample_data_point, 'layer3.1.conv1', feature_map_idx=4, device=DEVICE) # Index 3 is MaxPool3d if initial_block is Sequential
             # Or the output of an early convolution (e.g., the first one in res_block1):
-            # visualize_activation_maps(model, sample_data_point, 'event_encoder.res_block1.conv1', num_maps_to_plot=8, device=DEVICE)
+            visualize_activation_maps(model, sample_data_point, 'conv1', feature_map_idx=3, device=DEVICE)
 
         else:
             print("Could not retrieve a sample data point for activation visualization.")
