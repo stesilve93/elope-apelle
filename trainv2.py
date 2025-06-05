@@ -25,7 +25,7 @@ train_sequences = all_sequences[:22]  # 80% for training
 val_sequences = all_sequences[22:]    # 20% for validation
 
 INT_WINDOW_US = 1e5  # Integration window in microseconds
-SEQ_LEN = 5  # Length of IMU sequence
+SEQ_LEN = 3  # Length of IMU sequence
 H, W, T = 200, 200, 10  # Image dimensions and time steps
 SAMPLE_INTERVAL = 1
 
