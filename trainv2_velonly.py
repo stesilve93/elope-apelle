@@ -27,10 +27,10 @@ val_sequences = all_sequences[22:]    # 20% for validation
 
 INT_WINDOW_US = 1e5  # Integration window in microseconds
 SEQ_LEN = 3  # Length of IMU sequence
-H, W, T = 200, 200, 10  # Image dimensions and time steps
+H, W, T = 200, 200, 5  # Image dimensions and time steps
 SAMPLE_INTERVAL = 1
 
-CREATE_DATASET = False  # Set to True to create datasets
+CREATE_DATASET = True  # Set to True to create datasets
 if CREATE_DATASET:
     # Create datasets
     train_dataset = LunarDescentDataset(
@@ -65,7 +65,7 @@ else:
 
 
 # Create data loaders
-train_loader = TorchDataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=4)
+train_loader = TorchDataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=8)
 val_loader = TorchDataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=4)
 
 # Create model
@@ -76,6 +76,7 @@ print(f"Model has {sum(p.numel() for p in model.parameters())} parameters")
 trainer = LunarTrainer(model, train_loader, val_loader, device, velocity_only=VELOCITY_ONLY)
 
 # Train model
-trainer.train(num_epochs=100, save_path='best_lunar_pose_model_velocity.pth')
+trainer.train(num_epochs=100, save_path='best_lunar_pose_model_velocity.pth', max_patience=10)
+trainer.plot_training(save_figure=True, figure_name_prefix='./plots/training/training')
 
 print("Training completed!")

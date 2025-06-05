@@ -94,17 +94,17 @@ class DataLoader:
             print(f"Warning: t_current {t_current:.4f}s is out of trajectory timestamp range.")
             return None
         
-        print(f"Timestamps for t_current {t_current:.4f}s at index {traj_idx} corresponding to {self.timestamps_full[traj_idx]:.4f}s")
+        #print(f"Timestamps for t_current {t_current:.4f}s at index {traj_idx} corresponding to {self.timestamps_full[traj_idx]:.4f}s")
         
         # Ensure t_current is aligned with a trajectory timestamp for ground truth
         # Or, you can interpolate ground truth if t_current is arbitrary
         # For simplicity, we'll align it to the closest past trajectory timestamp.
         actual_t_current = self.timestamps_full[traj_idx]
-        print(f"Actual t_current aligned to trajectory timestamp: {actual_t_current:.4f}s at index {traj_idx}")
+        #print(f"Actual t_current aligned to trajectory timestamp: {actual_t_current:.4f}s at index {traj_idx}")
         # --- Extract Events ---
         # Convert actual_t_current (seconds) to microseconds for event filtering
         events_end_time_us = actual_t_current * 1e6
-        print(f"Events end time in microseconds: {events_end_time_us:.0f}us")
+        #print(f"Events end time in microseconds: {events_end_time_us:.0f}us")
         # Filter events up to events_end_time_us within the integration window
         events_mask = (self.events_full['t'] >= (events_end_time_us - event_integration_window_us)) & \
                       (self.events_full['t'] <= events_end_time_us)
@@ -177,7 +177,7 @@ class DataLoader:
             # If only velocity is estimated, we take the last 6 values (vx, vy, vz)
             ground_truth = self.trajectory_full[traj_idx, 3:6] # vx, vy, vz
             position_gt = self.trajectory_full[traj_idx, 0:3] # x, y, z
-            print(f"Ground truth at t_current {actual_t_current:.4f}s: Position {position_gt}, Velocity {ground_truth}")
+            #print(f"Ground truth at t_current {actual_t_current:.4f}s: Position {position_gt}, Velocity {ground_truth}")
             return {
                 'events_tensor': torch.from_numpy(events_tensor),
                 'imu_sequence': torch.from_numpy(imu_sequence.astype(np.float32)),
@@ -188,7 +188,7 @@ class DataLoader:
         else:
             # If position and velocity are estimated, we take the first 6 values (x, y, z, vx, vy, vz)
             ground_truth = self.trajectory_full[traj_idx, 0:6] # x,y,z,vx,vy,vz
-            print(f"Ground truth at t_current {actual_t_current:.4f}s: {ground_truth}")
+            #print(f"Ground truth at t_current {actual_t_current:.4f}s: {ground_truth}")
 
             return {
                 'events_tensor': torch.from_numpy(events_tensor),

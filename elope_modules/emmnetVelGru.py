@@ -39,9 +39,9 @@ class PositionalEncoding(nn.Module):
 
 
 class ResNet3DBlock(nn.Module):
-    """Enhanced 3D ResNet block with better regularization"""
+    """ 3D ResNet block with better regularization"""
     """
-    Enhanced 3D ResNet block with better regularization
+     3D ResNet block with better regularization
 
     Args:
     in_channels (int): The number of input channels
@@ -83,9 +83,9 @@ class ResNet3DBlock(nn.Module):
 
 
 class EventEncoder(nn.Module):
-    """Enhanced event encoder with better regularization"""
+    """ event encoder with better regularization"""
     """
-    Enhanced event encoder with better regularization
+     event encoder with better regularization
 
     Args:
     input_channels (int): The number of input channels. Defaults to 2.
@@ -267,7 +267,7 @@ class GRURangemeterEncoder(nn.Module):
 
 
 class CrossModalAttention(nn.Module):
-    """Enhanced cross-modal attention with residual connections"""
+    """ cross-modal attention with residual connections"""
     """
     Cross-modal attention module for fusion of event, IMU and rangemeter features
     
@@ -337,9 +337,12 @@ class CrossModalAttention(nn.Module):
         ffn_out = self.ffn(attended)
         ffn_out = self.norm2(ffn_out + attended)
         
-        # Global pooling with learnable weights
-        modal_weights = F.softmax(torch.mean(attention_weights, dim=1), dim=-1)
-        fused = torch.sum(ffn_out * modal_weights.unsqueeze(-1), dim=0)
+        # Use learnable weights if available, otherwise simple average
+        if hasattr(self, 'modal_weights'):
+            weights = F.softmax(self.modal_weights, dim=0)  # (3,)
+            fused = torch.sum(ffn_out * weights.view(3, 1, 1), dim=0)  # Weighted sum
+        else:
+            fused = torch.mean(ffn_out, dim=0)  # Simple average fallback
         
         return fused, attention_weights
 
@@ -403,7 +406,7 @@ class RegularizedRegressor(nn.Module):
 
 
 class MultiModalVelocityEstimator(nn.Module):
-    """Enhanced multi-modal network with better regularization"""
+    """ multi-modal network with better regularization"""
     def __init__(self, 
                  event_channels: int = 2,
                  event_output_dim: int = 128,
@@ -413,7 +416,7 @@ class MultiModalVelocityEstimator(nn.Module):
                  output_dim: int = 3,
                  dropout: float = 0.15):
         """
-        Initialize the Enhanced MultiModalVelocityEstimator with regularization and attention.
+        Initialize the  MultiModalVelocityEstimator with regularization and attention.
 
         Args:
             event_channels (int, optional): Number of event channels. Defaults to 2.
@@ -426,7 +429,7 @@ class MultiModalVelocityEstimator(nn.Module):
         """
         super().__init__()
         
-        # Initialize enhanced encoders with dropout for regularization
+        # Initialize  encoders with dropout for regularization
         self.event_encoder = EventEncoder(event_channels, event_output_dim, dropout)
         self.imu_encoder = TransformerIMUEncoder(output_dim=imu_output_dim, dropout=dropout)
         self.range_encoder = GRURangemeterEncoder(output_dim=range_output_dim, dropout=dropout)

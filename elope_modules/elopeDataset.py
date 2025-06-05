@@ -6,6 +6,10 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from elope_modules.dataloader import DataLoader
 from typing import Dict, Tuple
 import time
+import matplotlib.pyplot as plt
+import datetime
+import seaborn as sns
+
 
 
 class LunarDescentDataset(Dataset):
@@ -101,7 +105,7 @@ class LunarTrainer:
         
         # Loss and optimizer
         self.criterion = nn.MSELoss()
-        self.optimizer = optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-5)
+        self.optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
         self.scheduler = ReduceLROnPlateau(self.optimizer, mode='min', factor=0.5, 
                                          patience=5, verbose=True)
         
@@ -305,9 +309,21 @@ class LunarTrainer:
         
         return metrics
     
-    def train(self, num_epochs: int, save_path: str = 'best_model.pth'):
-        """Main training loop"""
+    def train(self, num_epochs: int, save_path: str = 'best_model.pth', max_patience: int = 10):
+        """
+        Main training loop.
+        
+        Args:
+            num_epochs (int): Number of epochs to train the model.
+            save_path (str): Path to save the best model (default: 'best_model.pth').
+            max_patience (int): Maximum number of epochs to wait for improvement (default: 10).
+        """
         print(f"Starting training for {num_epochs} epochs...")
+
+        # Get current timestamp
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Create the figure filename with timestamp
+        save_path_model = f"{save_path}_{timestamp}.pth"
         
         for epoch in range(num_epochs):
             start_time = time.time()
@@ -330,8 +346,12 @@ class LunarTrainer:
             # Save best model
             if val_loss < self.best_val_loss:
                 self.best_val_loss = val_loss
-                torch.save(self.model.state_dict(), save_path)
+                torch.save(self.model.state_dict(), save_path_model)
                 print(f"✓ New best model saved! Val loss: {val_loss:.4f}")
+                patience_counter = 0
+            else:
+                patience_counter+=1
+                print(f"✗ No improvement. Current best val loss: {self.best_val_loss:.4f}")
             
             # Print epoch summary
             epoch_time = time.time() - start_time
@@ -348,25 +368,44 @@ class LunarTrainer:
                 print(f"Val Loss: {val_loss:.4f}")
                 print(f"Val Metrics - Vel Error: {val_metrics['velocity_error']:.2f}m/s", f"elope_score: {val_metrics['elope_score']:.4f}")
             print("-" * 50)
-###########     testing code    ###########
-if __name__ == "__main__":
-    datapath = './elope_data' # Adjust as needed
-    data_loader = DataLoader(datapath=datapath)
 
-    # Generate a list of your 40 train trajectory IDs
-    # Assuming they are '0000.npz' to '0039.npz'
-    train_sequence_ids = [str(i).zfill(4) for i in range(28)]
+            if patience_counter >= max_patience:
+                print(" --> Early stopping triggered. No improvement for 10 epochs.")
+                break
 
-    # Create the dataset
-    train_dataset = LunarDescentDataset(
-        data_loader_instance=data_loader,
-        sequence_ids=train_sequence_ids,
-        event_integration_window_us=100000, # 100ms window
-        imu_seq_len=50,
-        H=200, W=200, T=10,
-        sample_interval=5 # Adjust sampling frequency
-    )
+    def plot_training(self, save_figure=False, figure_name_prefix="training_plot"):
+        """
+        Plots the training and validation losses over epochs.
+        Args:
+            save_figure (bool): If True, saves the figure to a file.
+            figure_name_prefix (str): Prefix for the filename if saving the figure.
+        """
+        if not self.train_losses:
+            print("No training data to plot. Please run the 'train' method first.")
+            return
 
-    # Create a PyTorch DataLoader
-    batch_size = 16 # Or whatever fits your GPU memory
-    train_dataloader = TorchDataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4) # num_workers for parallel data loading
+        epochs = range(1, len(self.train_losses) + 1)
+
+        sns.set_style("whitegrid")
+        plt.figure(figsize=(10, 6))
+
+        plt.plot(epochs, self.train_losses, label='Training Loss', color='skyblue', linewidth=2)
+        if self.val_losses:
+            plt.plot(epochs, self.val_losses, label='Validation Loss', color='salmon', linewidth=2)
+            
+        plt.title('Training and Validation Loss Over Epochs', fontsize=16)
+        plt.xlabel('Epoch', fontsize=12)
+        plt.ylabel('Loss', fontsize=12)
+        plt.legend(fontsize=10)
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.tight_layout()
+
+        if save_figure:
+            # Get current timestamp
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            # Create the figure filename with timestamp
+            figure_filename = f"{figure_name_prefix}_{timestamp}.png"
+            plt.savefig(figure_filename, dpi=300)
+            print(f"Figure saved as: {figure_filename}")
+        
+        plt.show()

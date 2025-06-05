@@ -9,7 +9,7 @@ from sklearn.manifold import TSNE
 import seaborn as sns 
 
 from elope_modules.dataloader import DataLoader
-from elope_modules.emmnetVel import create_model 
+from elope_modules.emmnetVelGru import create_model 
 from elope_modules.elopeDataset import LunarTrainer as lt
 
 def run_realtime_prediction_and_extract_features(
@@ -396,16 +396,16 @@ def visualize_activation_maps(
 if __name__ == "__main__":
     # --- Configuration ---
     DATAPATH = './elope_data' # Adjust as needed
-    MODEL_PATH = 'best_lunar_pose_model_velocity.pth' # Path to your trained model weights
-    TEST_SEQUENCE_ID = '0023' # A test sequence not used in training (e.g., the first test trajectory)
-    EXTRACT_INTERMEDIATE_FEATURES = False # Set to True if you want to extract event features
+    MODEL_PATH = 'best_lunar_pose_model_velocity.pth_20250605_140416.pth' # Path to your trained model weights
+    TEST_SEQUENCE_ID = '0024' # A test sequence not used in training (e.g., the first test trajectory)
+    EXTRACT_INTERMEDIATE_FEATURES = True # Set to True if you want to extract event features
     USE_ATTENTION = True # Must match how your trained model was created
     VELOCITY_ONLY = True # Set to True for velocity-only training
 
     INT_WINDOW_US = 1e5  # Integration window in microseconds
-    SEQ_LEN = 5  # Length of IMU sequence
-    H, W, T = 200, 200, 10  # Image dimensions and time steps
-    SAMPLE_INTERVAL = 1
+    SEQ_LEN = 3  # Length of IMU sequence
+    H, W, T = 200, 200, 5  # Image dimensions and time steps
+    PREDICTION_INTERVAL = 0.1
     
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device for inference: {DEVICE}")
@@ -433,10 +433,10 @@ if __name__ == "__main__":
             model=model,
             data_loader_instance=data_loader,
             sequence_id=TEST_SEQUENCE_ID,
-            event_integration_window_us=100000,
-            imu_seq_len=5,
-            H=200, W=200, T=5,
-            prediction_interval_s=0.05,
+            event_integration_window_us=INT_WINDOW_US,
+            imu_seq_len=SEQ_LEN,
+            H=H, W=W, T=T,
+            prediction_interval_s=PREDICTION_INTERVAL,
             start_offset_s=0.5,
             device=DEVICE
             )
@@ -489,7 +489,7 @@ if __name__ == "__main__":
                 event_integration_window_us=INT_WINDOW_US, # Same as training
                 imu_seq_len=SEQ_LEN, # Same as training
                 H=H, W=W, T=T, # Same as training
-                prediction_interval_s=SAMPLE_INTERVAL, # Make a prediction every 50ms
+                prediction_interval_s=PREDICTION_INTERVAL, # Make a prediction every 50ms
                 start_offset_s=0.5, # Ensure at least 0.5s of data for LSTM warm-up
                 device=DEVICE,
                 velocity_only=VELOCITY_ONLY # Use the same setting as training
@@ -508,7 +508,7 @@ if __name__ == "__main__":
                 event_integration_window_us=INT_WINDOW_US, # Same as training
                 imu_seq_len=SEQ_LEN, # Same as training
                 H=H, W=W, T=T, # Same as training
-                prediction_interval_s=SAMPLE_INTERVAL, # Make a prediction every 50ms
+                prediction_interval_s=PREDICTION_INTERVAL, # Make a prediction every 50ms
                 start_offset_s=0.5, # Ensure at least 0.5s of data for LSTM warm-up
                 device=DEVICE,
                 velocity_only=VELOCITY_ONLY # Use the same setting as training
@@ -568,8 +568,8 @@ if __name__ == "__main__":
             label = info['label']
             ylabel = info['ylabel']
 
-            ax.plot(prediction_times, ground_truth_states[:, idx], label=f'GT {label}', color='blue', linewidth=2)
-            ax.plot(prediction_times, predicted_states[:, idx], label=f'Pred {label}', color='red', linestyle='--', linewidth=1.5)
+            ax.plot(prediction_times, ground_truth_states[:, idx], label=f'GT {label}', color='blue', linewidth=2, marker='o', markersize=3)
+            ax.plot(prediction_times, predicted_states[:, idx], label=f'Pred {label}', color='red', linestyle='--', linewidth=1.5, marker='x', markersize=3)
             
             ax.set_title(f'{label} Prediction vs. Ground Truth')
             ax.set_xlabel('Time (s)')
@@ -616,7 +616,7 @@ if __name__ == "__main__":
                         print(f"Name: {name:<50} Type: {type(module)}")
                 print("-----------------------------------\n")
 
-            print_model_layers(model)
+            #print_model_layers(model)
             visualize_activation_maps(model, sample_data_point, 'layer1.1.conv1', feature_map_idx=3, device=DEVICE)
             # Or the activation *after* the initial block's MaxPool3d:
             visualize_activation_maps(model, sample_data_point, 'layer3.1.conv1', feature_map_idx=4, device=DEVICE) # Index 3 is MaxPool3d if initial_block is Sequential
