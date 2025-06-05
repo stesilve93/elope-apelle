@@ -6,7 +6,7 @@ from torch.utils.data import Dataset, DataLoader as TorchDataLoader
 import os
 import numpy as np
 
-from elope_modules.emmnetVel import create_model
+from elope_modules.emmnetVelGru import create_model
 from elope_modules.elopeDataset import LunarDescentDataset, LunarTrainer
 from elope_modules.dataloader import DataLoader
 from torch.utils.data import Dataset, DataLoader as TorchDataLoader
@@ -30,7 +30,7 @@ SEQ_LEN = 3  # Length of IMU sequence
 H, W, T = 200, 200, 10  # Image dimensions and time steps
 SAMPLE_INTERVAL = 1
 
-CREATE_DATASET = True  # Set to True to create datasets
+CREATE_DATASET = False  # Set to True to create datasets
 if CREATE_DATASET:
     # Create datasets
     train_dataset = LunarDescentDataset(

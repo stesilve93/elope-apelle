@@ -102,7 +102,7 @@ def run_realtime_prediction(
     event_integration_window_us: float = 1e5, # 100ms
     imu_seq_len: int = 5,
     H: int = 200, W: int = 200, T: int = 5,
-    prediction_interval_s: float = 0.05, # How often to make a prediction (e.g., every 50ms)
+    prediction_interval_s: float = 0.5, # How often to make a prediction (e.g., every 50ms)
     start_offset_s: float = 0.5, # Time to wait before first prediction (to fill LSTM buffers)
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     velocity_only: bool = True # If True, only predict velocity (vx,vy,vz)
