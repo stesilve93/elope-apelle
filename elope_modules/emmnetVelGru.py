@@ -319,6 +319,10 @@ class CrossModalAttention(nn.Module):
         self.norm2 = nn.LayerNorm(hidden_dim)
         # Dropout regularization
         self.dropout = nn.Dropout(dropout)
+
+        # Learnable weights for each modality
+        #self.modal_weights = nn.Parameter(torch.ones(3)) # Learnable weights for each modality
+
         
     def forward(self, event_feat, imu_feat, range_feat):
         # Project features

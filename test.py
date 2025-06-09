@@ -442,15 +442,15 @@ def visualize_event_data(events_tensor, current_time):
 if __name__ == "__main__":
     # --- Configuration ---
     DATAPATH = './elope_data' # Adjust as needed
-    MODEL_PATH = 'best_lunar_pose_model_velocity.pth_20250609_114922.pth' # Path to your trained model weights
-    TEST_SEQUENCE_ID = '0022' # A test sequence not used in training (e.g., the first test trajectory)
+    MODEL_PATH = 'best_lunar_pose_model_velocity.pth_20250609_122954.pth' # Path to your trained model weights
+    TEST_SEQUENCE_ID = '0024' # A test sequence not used in training (e.g., the first test trajectory)
     EXTRACT_INTERMEDIATE_FEATURES = False # Set to True if you want to extract event features
     USE_ATTENTION = True # Must match how your trained model was created
     VELOCITY_ONLY = True # Set to True for velocity-only training
     EVENT_ENCODER_METHOD = 'last_timestamp' # Method to encode events, e.g., 'last_timestamp', 'count', etc.
 
     INT_WINDOW_US = 1e5  # Integration window in microseconds
-    SEQ_LEN = 25  # Length of IMU sequence
+    SEQ_LEN = 3 # Length of IMU sequence
     H, W, T = 200, 200, 5  # Image dimensions and time steps
     PREDICTION_INTERVAL = 0.1
     
