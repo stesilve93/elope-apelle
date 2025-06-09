@@ -21,7 +21,9 @@ def run_realtime_prediction_and_extract_features(
     H: int = 200, W: int = 200, T: int = 5,
     prediction_interval_s: float = 0.05,
     start_offset_s: float = 0.5,
-    device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+    velocity_only: bool = True, # If True, only predict velocity (vx,vy,vz)
+    event_encoder_method: str = 'last_timestamp' # Method to encode events, e.g., 'last_timestamp', 'count', etc.
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]: # Added event_features_all
     """
     Runs "real-time" sequential prediction and extracts event features for analysis.
@@ -72,6 +74,8 @@ def run_realtime_prediction_and_extract_features(
             current_t_idx += 1
             continue
         
+        visualize_event_data(data_point['events_tensor'].cpu(), current_time=t_current_s)
+
         event_t = data_point['events_tensor'].unsqueeze(0).to(device)
         imu_s = data_point['imu_sequence'].unsqueeze(0).to(device)
         range_s = data_point['rangemeter_sequence'].unsqueeze(0).to(device)
@@ -105,7 +109,8 @@ def run_realtime_prediction(
     prediction_interval_s: float = 0.5, # How often to make a prediction (e.g., every 50ms)
     start_offset_s: float = 0.5, # Time to wait before first prediction (to fill LSTM buffers)
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-    velocity_only: bool = True # If True, only predict velocity (vx,vy,vz)
+    velocity_only: bool = True, # If True, only predict velocity (vx,vy,vz)
+    event_encoder_method: str = 'last_timestamp' # Method to encode events, e.g., 'last_timestamp', 'count', etc.
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Runs "real-time" sequential prediction on a single test trajectory.
@@ -391,19 +396,61 @@ def visualize_activation_maps(
     plt.tight_layout(rect=[0.02, 0.03, 1, 0.98])
     plt.savefig(f"./plots/input_vs_activation_{layer_name.replace('.', '_')}_map{feature_map_idx}_{TEST_SEQUENCE_ID}.png", dpi=300)
     
+def visualize_event_data(events_tensor, current_time):
+    """
+    Visualizes the events_tensor for specified timestamps.
+
+    Args:
+        events_tensor (np.ndarray): The 4D events tensor polarity-features-h-w (2, 2, H, W).
+        timestamp_indices (list): A list of indices for the timestamps to visualize.
+    """
+    feature_types = ["Normalized Timestamps", "Freshness Values"]
+    polarities = ["Positive Events", "Negative Events"]
+    
+    # Extract H and W from the tensor
+    _, H, W, _ = events_tensor.shape
+
+    # For each feature type (timestamps, freshness)
+    for feature_channel_idx in range(events_tensor.shape[1]):
+        fig, axes = plt.subplots(1, 2, figsize=(15, 6)) # One row, two columns for polarities
+        fig.suptitle(f"{feature_types[feature_channel_idx]} at Timestamp {current_time}", fontsize=16)
+
+        # For each polarity (positive, negative)
+        for polarity_channel_idx in range(events_tensor.shape[0]):
+            ax = axes[polarity_channel_idx]
+            
+            # Extract the 2D data slice
+            data_slice = events_tensor[polarity_channel_idx, feature_channel_idx, :, :]
+            
+            # Use imshow to render the feature values as an image
+            # 'viridis' is a good perceptually uniform colormap
+            # vmin/vmax ensure consistent scaling (features are 0-1)
+            im = ax.imshow(data_slice, cmap='Greys', origin='lower', vmin=0, vmax=1)
+            
+            ax.set_title(f"{polarities[polarity_channel_idx]}")
+            ax.set_xlabel("Width")
+            ax.set_ylabel("Height")
+            
+            # Add a colorbar for interpretation
+            fig.colorbar(im, ax=ax, orientation='vertical', fraction=0.046, pad=0.04)
+
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # Adjust layout to prevent title overlap
+        plt.savefig(f"./plots/event_tensor_{current_time}_{feature_types[feature_channel_idx]}_{TEST_SEQUENCE_ID}.png", dpi=300) 
+
 
 # --- Main execution block for testing ---
 if __name__ == "__main__":
     # --- Configuration ---
     DATAPATH = './elope_data' # Adjust as needed
-    MODEL_PATH = 'best_lunar_pose_model_velocity.pth_20250605_140416.pth' # Path to your trained model weights
-    TEST_SEQUENCE_ID = '0024' # A test sequence not used in training (e.g., the first test trajectory)
-    EXTRACT_INTERMEDIATE_FEATURES = True # Set to True if you want to extract event features
+    MODEL_PATH = 'best_lunar_pose_model_velocity.pth_20250609_114922.pth' # Path to your trained model weights
+    TEST_SEQUENCE_ID = '0022' # A test sequence not used in training (e.g., the first test trajectory)
+    EXTRACT_INTERMEDIATE_FEATURES = False # Set to True if you want to extract event features
     USE_ATTENTION = True # Must match how your trained model was created
     VELOCITY_ONLY = True # Set to True for velocity-only training
+    EVENT_ENCODER_METHOD = 'last_timestamp' # Method to encode events, e.g., 'last_timestamp', 'count', etc.
 
     INT_WINDOW_US = 1e5  # Integration window in microseconds
-    SEQ_LEN = 3  # Length of IMU sequence
+    SEQ_LEN = 25  # Length of IMU sequence
     H, W, T = 200, 200, 5  # Image dimensions and time steps
     PREDICTION_INTERVAL = 0.1
     
@@ -438,7 +485,9 @@ if __name__ == "__main__":
             H=H, W=W, T=T,
             prediction_interval_s=PREDICTION_INTERVAL,
             start_offset_s=0.5,
-            device=DEVICE
+            device=DEVICE,
+            velocity_only=VELOCITY_ONLY,
+            event_encoder_method=EVENT_ENCODER_METHOD
             )
         
         print("\nVisualizing Event Feature Embeddings with t-SNE...")
@@ -492,7 +541,8 @@ if __name__ == "__main__":
                 prediction_interval_s=PREDICTION_INTERVAL, # Make a prediction every 50ms
                 start_offset_s=0.5, # Ensure at least 0.5s of data for LSTM warm-up
                 device=DEVICE,
-                velocity_only=VELOCITY_ONLY # Use the same setting as training
+                velocity_only=VELOCITY_ONLY, # Use the same setting as training
+                event_encoder_method=EVENT_ENCODER_METHOD # Use the same method as training
             )
 
             test_metrics = lt.compute_metrics(torch.tensor(predicted_states), torch.tensor(ground_truth_states), 

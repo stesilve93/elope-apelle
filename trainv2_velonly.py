@@ -29,8 +29,9 @@ INT_WINDOW_US = 1e5  # Integration window in microseconds
 SEQ_LEN = 3  # Length of IMU sequence
 H, W, T = 200, 200, 5  # Image dimensions and time steps
 SAMPLE_INTERVAL = 1
+EVENT_ENCODER_METHOD = 'last_timestamp'
 
-CREATE_DATASET = True  # Set to True to create datasets
+CREATE_DATASET = False  # Set to True to create datasets
 if CREATE_DATASET:
     # Create datasets
     train_dataset = LunarDescentDataset(
@@ -40,7 +41,8 @@ if CREATE_DATASET:
         imu_seq_len=SEQ_LEN,
         H=H, W=W, T=T,
         sample_interval=SAMPLE_INTERVAL,
-        velocity_only=VELOCITY_ONLY 
+        velocity_only=VELOCITY_ONLY,
+        event_encoder_method= EVENT_ENCODER_METHOD
     )
 
     val_dataset = LunarDescentDataset(
@@ -50,17 +52,18 @@ if CREATE_DATASET:
         imu_seq_len=SEQ_LEN,
         H=H, W=W, T=T,
         sample_interval=SAMPLE_INTERVAL,  # Sample less frequently for validation
-        velocity_only=VELOCITY_ONLY  # Ensure validation dataset is also velocity-only
+        velocity_only=VELOCITY_ONLY,  # Ensure validation dataset is also velocity-only
+        event_encoder_method= EVENT_ENCODER_METHOD
     )
 
     # Save
-    torch.save(train_dataset, f'dataset/vel_only/train_dataset_integration_window_{INT_WINDOW_US}_imu_seq_len_{SEQ_LEN}_H_{H}_W_{W}_T_{T}_sample_interval_{SAMPLE_INTERVAL}.pth')
-    torch.save(val_dataset, f'dataset/vel_only/val_dataset_integration_window_{INT_WINDOW_US}_imu_seq_len_{SEQ_LEN}_H_{H}_W_{W}_T_{T}_sample_interval_{SAMPLE_INTERVAL}.pth')
+    torch.save(train_dataset, f'dataset/vel_only/train_dataset_integration_window_{INT_WINDOW_US}_imu_seq_len_{SEQ_LEN}_H_{H}_W_{W}_T_{T}_sample_interval_{SAMPLE_INTERVAL}_{EVENT_ENCODER_METHOD}.pth')
+    torch.save(val_dataset, f'dataset/vel_only/val_dataset_integration_window_{INT_WINDOW_US}_imu_seq_len_{SEQ_LEN}_H_{H}_W_{W}_T_{T}_sample_interval_{SAMPLE_INTERVAL}_{EVENT_ENCODER_METHOD}.pth')
 else:
     # Load datasets if they already exist
-    train_dataset = torch.load(f'dataset/vel_only/train_dataset_integration_window_{INT_WINDOW_US}_imu_seq_len_{SEQ_LEN}_H_{H}_W_{W}_T_{T}_sample_interval_{SAMPLE_INTERVAL}.pth',
+    train_dataset = torch.load(f'dataset/vel_only/train_dataset_integration_window_{INT_WINDOW_US}_imu_seq_len_{SEQ_LEN}_H_{H}_W_{W}_T_{T}_sample_interval_{SAMPLE_INTERVAL}_{EVENT_ENCODER_METHOD}.pth',
                                weights_only=False)
-    val_dataset = torch.load(f'dataset/vel_only/val_dataset_integration_window_{INT_WINDOW_US}_imu_seq_len_{SEQ_LEN}_H_{H}_W_{W}_T_{T}_sample_interval_{SAMPLE_INTERVAL}.pth',
+    val_dataset = torch.load(f'dataset/vel_only/val_dataset_integration_window_{INT_WINDOW_US}_imu_seq_len_{SEQ_LEN}_H_{H}_W_{W}_T_{T}_sample_interval_{SAMPLE_INTERVAL}_{EVENT_ENCODER_METHOD}.pth',
                              weights_only=False)
 
 

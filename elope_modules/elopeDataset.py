@@ -19,7 +19,8 @@ class LunarDescentDataset(Dataset):
                  imu_seq_len: int = 50,
                  H: int = 200, W: int = 200, T: int = 10,
                  sample_interval: int = 10,
-                 velocity_only: bool = True):
+                 velocity_only: bool = True,
+                 event_encoder_method: str = 'last_timestamp'):
         """
         Custom PyTorch Dataset for lunar descent data.
 
@@ -72,7 +73,7 @@ class LunarDescentDataset(Dataset):
                         t_curr_s,
                         event_integration_window_us=self.event_integration_window_us,
                         imu_seq_len=self.imu_seq_len,
-                        H=self.H, W=self.W, T=self.T
+                        H=self.H, W=self.W, T=self.T, event_encoder_method=event_encoder_method
                     )
                     if data_point:
                         self.samples.append(data_point)
@@ -87,6 +88,15 @@ class LunarDescentDataset(Dataset):
         # Return the pre-processed tensors and ground truth
         if self.velocity_only:
             sample = self.samples[idx]
+                    # Check if this is the problematic shape
+            #if self.samples[idx]['events_tensor'].shape == torch.Size([2, 5, 200, 200]):
+            #    raise ValueError(f"Found problematic events shape {torch.Size([2, 5, 200, 200])} at dataset index: {idx}")
+
+            # print(f"Dataset item {idx}: events shape = {self.samples[idx]['events_tensor'].shape}, "
+            #       f"imu shape = {self.samples[idx]['imu_sequence'].shape}, "
+            #       f"rangemeter shape = {self.samples[idx]['rangemeter_sequence'].shape}, "
+            #       f"ground truth shape = {self.samples[idx]['ground_truth'].shape}, "
+            #       f"position ground truth shape = {self.samples[idx]['position_gt'].shape}")
             return (sample['events_tensor'], sample['imu_sequence'],
                     sample['rangemeter_sequence'], sample['ground_truth'], sample['position_gt'])
         else:
@@ -356,6 +366,7 @@ class LunarTrainer:
             # Print epoch summary
             epoch_time = time.time() - start_time
             print(f"\nEpoch {epoch+1}/{num_epochs} ({epoch_time:.1f}s)")
+            print(f"Learning Rate: {self.optimizer.param_groups[0]['lr']:.6f}")
             print(f"Train Loss: {train_metrics['total_loss']:.4f} "
                   f"(Pos: {train_metrics['position_loss']:.4f}, "
                   f"Vel: {train_metrics['velocity_loss']:.4f})")

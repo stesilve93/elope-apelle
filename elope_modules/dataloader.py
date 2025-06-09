@@ -67,7 +67,7 @@ class DataLoader:
     def get_data_at_time(self, t_current: float,
                          event_integration_window_us: float = 1e5,
                          imu_seq_len: int = 50,
-                         H: int = 200, W: int = 200, T: int = 10) -> Optional[Dict]:
+                         H: int = 200, W: int = 200, T: int = 10, event_encoder_method: str = "last_timestamp") -> Optional[Dict]:
         """
         Extracts preprocessed data for a given t_current.
 
@@ -115,7 +115,7 @@ class DataLoader:
         # Pass actual_t_current in microseconds for your preprocess_events logic
         events_tensor = self.preprocess_events(current_events, events_end_time_us,
                                                time_window=event_integration_window_us,
-                                               H=H, W=W, T=T)
+                                               H=H, W=W, T=T, method=event_encoder_method)
 
         # --- Extract IMU Sequence ---
         # IMU data corresponds to trajectory data directly
@@ -199,7 +199,7 @@ class DataLoader:
     
     def preprocess_events(self, events: np.ndarray, end_time: float,
                          time_window: float = 1e5,
-                         H: int = 200, W: int = 200, T: int = 10) -> np.ndarray:
+                         H: int = 200, W: int = 200, T: int = 10, method="last_timestamp") -> np.ndarray:
         """
         Preprocess events into a 4D tensor representation (EVFlownet-like).
 
@@ -235,8 +235,11 @@ class DataLoader:
         if events_array.shape[0] == 0:
             print("No events found in the specified time window.")
             # Return an empty tensor with the expected shape
-            return np.zeros((2, T, H, W), dtype=np.float32)
-        
+            if method == "count":
+                return np.zeros((2, T, H, W), dtype=np.float32)
+            elif method == "last_timestamp":
+                return np.zeros((2, 2, H, W), dtype=np.float32)
+            
         # Filter events based on the given time window (most recent events)
         if time_window > 0:
             t_max = end_time
@@ -245,7 +248,8 @@ class DataLoader:
             events_array = events_array[mask]
 
         # Convert the filtered events into a 4D tensor
-        tensor = self.processor.events_to_tensor(events_array, H, W, T)
+        tensor = self.processor.events_to_tensor(events_array, H, W, T, method=method,
+                                                 end_time=end_time, time_window=time_window)
 
         # Normalize the tensor using standard normalization
         tensor = self.processor.normalize_tensor(tensor, method='standard')
