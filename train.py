@@ -26,12 +26,13 @@ train_sequences = all_sequences[:22]  # 80% for training
 val_sequences = all_sequences[22:]    # 20% for validation
 
 INT_WINDOW_US = 1e5  # Integration window in microseconds
-SEQ_LEN = 10  # Length of IMU sequence
+SEQ_LEN = 5  # Length of IMU sequence
 H, W, T = 200, 200, 5  # Image dimensions and time steps
 SAMPLE_INTERVAL = 1
-EVENT_ENCODER_METHOD = 'count'
+EVENT_ENCODER_METHOD = 'last_timestamp' # count or last_timestamp
+USE_PHYSICS_AWARE = True  # Use physics-aware imu encoder
 
-CREATE_DATASET = True  # Set to True to create datasets
+CREATE_DATASET = False  # Set to True to create datasets
 if CREATE_DATASET:
     # Create datasets
     train_dataset = LunarDescentDataset(
@@ -72,14 +73,14 @@ train_loader = TorchDataLoader(train_dataset, batch_size=32, shuffle=True, num_w
 val_loader = TorchDataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=4)
 
 # Create model
-model = create_model(use_attention=True, device=device) # if emmnetSpatial is used, set use_attention=False
+model = create_model(use_attention=True, device=device, use_physics_aware=USE_PHYSICS_AWARE) # if emmnetSpatial is used, set use_attention=False
 print(f"Model has {sum(p.numel() for p in model.parameters())} parameters")
 
 # Create trainer
 trainer = LunarTrainer(model, train_loader, val_loader, device, velocity_only=VELOCITY_ONLY)
 
 # Train model
-trainer.train(num_epochs=100, save_path=f'model_integration_window_{INT_WINDOW_US}_imu_seq_len_{SEQ_LEN}_H_{H}_W_{W}_T_{T}_{EVENT_ENCODER_METHOD}.pth', max_patience=10)
+trainer.train(num_epochs=100, save_path=f'model_integration_window_{INT_WINDOW_US}_imu_seq_len_{SEQ_LEN}_H_{H}_W_{W}_T_{T}_{EVENT_ENCODER_METHOD}_physics_aware_{USE_PHYSICS_AWARE}.pth', max_patience=10)
 trainer.plot_training(save_figure=True, figure_name_prefix='./plots/training/training')
 
 print("Training completed!")

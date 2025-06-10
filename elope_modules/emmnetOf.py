@@ -618,6 +618,134 @@ class RegularizedRegressor(nn.Module):
         
         return out
 
+class OpticalFlowHead(nn.Module):
+    """
+    Optical flow prediction head that generates dense flow maps from fused features
+    """
+    def __init__(self, input_dim: int, flow_height: int = 200, flow_width: int = 200, 
+                 dropout: float = 0.1):
+        super().__init__()
+        self.flow_height = flow_height
+        self.flow_width = flow_width
+        
+        # Progressive decoder to generate dense flow
+        self.flow_decoder = nn.Sequential(
+            # Initial expansion
+            nn.Linear(input_dim, 512),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            
+            nn.Linear(512, 1024),
+            nn.GELU(),
+            nn.Dropout(dropout),
+        )
+        
+        # Spatial decoder - start from small spatial size and upsample
+        initial_size = 8  # Start from 8x8
+        self.spatial_decoder = nn.Sequential(
+            # Reshape happens in forward pass: (B, 1024) -> (B, 64, 4, 4)
+            
+            # 8x8 -> 16x16
+            nn.ConvTranspose2d(64, 128, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(128),
+            nn.GELU(),
+            
+            # 16x16 -> 32x32  
+            nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(64),
+            nn.GELU(),
+            
+            # 32x32 -> 64x64
+            nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(32),
+            nn.GELU(),
+            
+            # 64x64 -> 128x128
+            nn.ConvTranspose2d(32, 16, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(16),
+            nn.GELU(),
+            
+            # 128x128 -> 256x256 (will be resized to 200x200)
+            nn.ConvTranspose2d(16, 8, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(8),
+            nn.GELU(),
+            
+            # Final flow prediction (2 channels for u,v)
+            nn.Conv2d(8, 2, kernel_size=3, padding=1),
+        )
+        
+    def forward(self, features):
+        # features: (B, input_dim)
+        B = features.size(0)
+        
+        # Expand features
+        x = self.flow_decoder(features)  # (B, 1024)
+        
+        # Reshape for spatial processing
+        x = x.view(B, 64, 4, 4)  # (B, 64, 4, 4)
+        
+        # Generate flow through spatial decoder
+        flow = self.spatial_decoder(x)  # (B, 2, 256, 256)
+        
+        # Resize to target resolution
+        if flow.size(2) != self.flow_height or flow.size(3) != self.flow_width:
+            flow = F.interpolate(flow, size=(self.flow_height, self.flow_width), 
+                               mode='bilinear', align_corners=False)
+            
+        return flow  # (B, 2, H, W)
+
+
+class EventWarper(nn.Module):
+    """Warps event frames using predicted optical flow"""
+    def __init__(self):
+        super().__init__()
+        
+    def create_mesh_grid(self, height, width, device):
+        """Create normalized coordinate mesh grid"""
+        y_coords = torch.linspace(-1, 1, height, device=device)
+        x_coords = torch.linspace(-1, 1, width, device=device)
+        y_grid, x_grid = torch.meshgrid(y_coords, x_coords, indexing='ij')
+        grid = torch.stack([x_grid, y_grid], dim=-1)
+        return grid
+        
+    def forward(self, events, flow, dt=1.0):
+        """Warp events using optical flow"""
+        B, C, H, W = events.shape
+        device = events.device
+        
+        # Create base coordinate grid
+        base_grid = self.create_mesh_grid(H, W, device)
+        base_grid = base_grid.unsqueeze(0).expand(B, -1, -1, -1)
+        
+        # Normalize flow to [-1, 1] coordinate system
+        flow_normalized = flow.permute(0, 2, 3, 1)
+        flow_normalized[..., 0] = flow_normalized[..., 0] / (W / 2.0)
+        flow_normalized[..., 1] = flow_normalized[..., 1] / (H / 2.0)
+        
+        # Create warping grid
+        warp_grid = base_grid + flow_normalized * dt
+        
+        # Warp events
+        warped_events = F.grid_sample(
+            events, warp_grid, mode='bilinear', 
+            padding_mode='zeros', align_corners=False
+        )
+        
+        return warped_events
+
+"""
+Event/IMU/Range Data
+        ↓
+   Feature Encoders 
+        ↓
+   Cross-Modal Fusion 
+        ↓
+    Fused Features
+       ↙    ↘
+Velocity Head  Flow Head
+     ↓          ↓
+   3D Vector   200×200×2 Flow Map
+"""
 
 class MultiModalVelocityEstimator(nn.Module):
     """ Multi-modal network with better regularization"""
@@ -712,6 +840,188 @@ class MultiModalVelocityEstimator(nn.Module):
             'range_features': range_feat,
             'attention_weights': attention_weights
         }
+    
+class MultiModalVelocityEstimatorWithFlow(nn.Module):
+    """
+    Extended multi-modal network with dual prediction heads:
+    1. Global velocity estimation (original functionality)
+    2. Dense optical flow estimation (new functionality)
+    """
+    def __init__(self, 
+                 event_channels: int = 2,
+                 event_output_dim: int = 128,
+                 imu_output_dim: int = 32,
+                 range_output_dim: int = 16,
+                 use_attention: bool = True,
+                 velocity_output_dim: int = 3,
+                 flow_height: int = 200,
+                 flow_width: int = 200,
+                 dropout: float = 0.15,
+                 use_physics_aware: bool = True):
+        """
+        Initialize multi-modal estimator with dual prediction heads
+        
+        Args:
+            event_channels: Number of event channels
+            event_output_dim: Output dimension of event encoder  
+            imu_output_dim: Output dimension of IMU encoder
+            range_output_dim: Output dimension of range encoder
+            use_attention: Whether to use cross-modal attention
+            velocity_output_dim: Dimension of velocity prediction
+            flow_height: Height of optical flow output
+            flow_width: Width of optical flow output
+            dropout: Dropout probability
+            use_physics_aware: Whether to use physics-aware IMU encoder
+        """
+        super().__init__()
+        
+        # Initialize encoders (same as original)
+        self.event_encoder = EventEncoder(event_channels, event_output_dim, dropout)
+        if use_physics_aware:
+            self.imu_encoder = PhysicsAwareIMUEncoder(output_dim=imu_output_dim, dropout=dropout)
+        else:
+            self.imu_encoder = TransformerIMUEncoder(output_dim=imu_output_dim, dropout=dropout)
+        self.range_encoder = GRURangemeterEncoder(output_dim=range_output_dim, dropout=dropout)
+        
+        # Fusion strategy
+        self.use_attention = use_attention
+        if use_attention:
+            self.fusion = CrossModalAttention(
+                event_output_dim, imu_output_dim, range_output_dim, dropout=dropout
+            )
+            fusion_dim = 128  # Hidden dimension from attention
+        else:
+            fusion_dim = event_output_dim + imu_output_dim + range_output_dim
+        
+        # Dual prediction heads
+        self.velocity_head = RegularizedRegressor(fusion_dim, velocity_output_dim, dropout)
+        self.flow_head = OpticalFlowHead(fusion_dim, flow_height, flow_width, dropout)
+        
+        # Self-supervision components
+        self.warper = EventWarper()
+        
+        # Loss weights for multi-task learning
+        self.velocity_weight = 1.0
+        self.photo_weight = 0.8
+        self.smooth_weight = 0.1
+        self.consistency_weight = 0.3
+        
+        self._init_weights()
+    
+    def _init_weights(self):
+        """Initialize weights properly"""
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight, gain=0.5)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
+            elif isinstance(module, (nn.Conv3d, nn.Conv2d, nn.Conv1d, nn.ConvTranspose2d)):
+                nn.init.kaiming_normal_(module.weight, mode='fan_out', nonlinearity='relu')
+    
+    def extract_features(self, event_tensor, imu_tensor, range_tensor):
+        """Extract and fuse features from all modalities"""
+        # Extract individual features
+        event_feat = self.event_encoder(event_tensor)
+        imu_feat = self.imu_encoder(imu_tensor)
+        range_feat = self.range_encoder(range_tensor)
+        
+        # Fusion
+        if self.use_attention:
+            fused_feat, attention_weights = self.fusion(event_feat, imu_feat, range_feat)
+        else:
+            fused_feat = torch.cat([event_feat, imu_feat, range_feat], dim=1)
+            attention_weights = None
+            
+        return {
+            'fused_features': fused_feat,
+            'event_features': event_feat,
+            'imu_features': imu_feat, 
+            'range_features': range_feat,
+            'attention_weights': attention_weights
+        }
+    def compute_flow_losses(self, events_t0, events_t1, flow_01, flow_10=None):
+        """Compute self-supervised optical flow losses"""
+        losses = {}
+        
+        # Photometric loss
+        warped_events = self.warper(events_t0, flow_01)
+        losses['photo'] = F.l1_loss(warped_events, events_t1, reduction='mean')
+        
+        # Smoothness loss
+        grad_u_x = torch.abs(flow_01[:, 0, :, 1:] - flow_01[:, 0, :, :-1])
+        grad_u_y = torch.abs(flow_01[:, 0, 1:, :] - flow_01[:, 0, :-1, :])
+        grad_v_x = torch.abs(flow_01[:, 1, :, 1:] - flow_01[:, 1, :, :-1])
+        grad_v_y = torch.abs(flow_01[:, 1, 1:, :] - flow_01[:, 1, :-1, :])
+        losses['smooth'] = (grad_u_x.mean() + grad_u_y.mean() + 
+                           grad_v_x.mean() + grad_v_y.mean())
+        
+        # Consistency loss (if backward flow provided)
+        if flow_10 is not None:
+            warped_flow = self.warper(flow_01, flow_10)
+            losses['consistency'] = F.l1_loss(warped_flow + flow_10, 
+                                            torch.zeros_like(flow_10), reduction='mean')
+        
+        return losses
+    
+    def forward(self, event_tensor, imu_tensor, range_tensor, 
+                event_tensor_next=None, velocity_target=None, mode='train'):
+        """
+        Forward pass with dual prediction heads
+        
+        Args:
+            event_tensor: Current event frame
+            imu_tensor: IMU data
+            range_tensor: Range data  
+            event_tensor_next: Next event frame (for flow supervision)
+            velocity_target: Ground truth velocity (if available)
+            mode: 'train', 'eval', or 'flow_only'
+        """
+        # Extract features
+        features = self.extract_features(event_tensor, imu_tensor, range_tensor)
+        
+        # Dual predictions
+        velocity_pred = self.velocity_head(features['fused_features'])
+        flow_pred = self.flow_head(features['fused_features'])
+        
+        output = {
+            'velocity_prediction': velocity_pred,
+            'flow_prediction': flow_pred,
+            'features': features
+        }
+        
+        # Compute losses during training
+        if mode == 'train' and event_tensor_next is not None:
+            # Flow self-supervision losses
+            flow_losses = self.compute_flow_losses(event_tensor, event_tensor_next, flow_pred)
+            
+            # Optional: compute backward flow for consistency
+            if hasattr(self, 'compute_backward_flow') and self.compute_backward_flow:
+                features_next = self.extract_features(event_tensor_next, imu_tensor, range_tensor)
+                flow_pred_back = self.flow_head(features_next['fused_features'])
+                flow_losses.update(
+                    self.compute_flow_losses(event_tensor_next, event_tensor, 
+                                           flow_pred_back, flow_pred)
+                )
+            
+            # Combine losses
+            total_loss = (self.photo_weight * flow_losses['photo'] + 
+                         self.smooth_weight * flow_losses['smooth'])
+            
+            if 'consistency' in flow_losses:
+                total_loss += self.consistency_weight * flow_losses['consistency']
+            
+            # Add velocity loss if target available
+            if velocity_target is not None:
+                velocity_loss = F.mse_loss(velocity_pred, velocity_target)
+                total_loss += self.velocity_weight * velocity_loss
+                output['velocity_loss'] = velocity_loss
+            
+            output.update({
+                'total_loss': total_loss,
+                'flow_losses': flow_losses
+            })
+        
+        return output
 
 
 def create_model(use_attention: bool = True, device: str = 'cpu', 
@@ -723,3 +1033,88 @@ def create_model(use_attention: bool = True, device: str = 'cpu',
         use_physics_aware=use_physics_aware
     )
     return model.to(device)
+
+def create_model_with_flow(use_attention: bool = True, device: str = 'cpu', 
+                          dropout: float = 0.15, use_physics_aware: bool = True,
+                          flow_height: int = 200, flow_width: int = 200) -> MultiModalVelocityEstimatorWithFlow:
+    """Factory function to create the model with optical flow capability"""
+    model = MultiModalVelocityEstimatorWithFlow(
+        use_attention=use_attention,
+        dropout=dropout,
+        use_physics_aware=use_physics_aware,
+        flow_height=flow_height,
+        flow_width=flow_width
+    )
+    return model.to(device)
+
+##############################################################################
+# Example usage
+def example_training_step():
+    """Example of how to use the dual-head model"""
+    
+    # Create model
+    model = create_model_with_flow(flow_height=200, flow_width=200)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-5)
+    
+    # Example batch
+    batch_size = 4
+    event_t0 = torch.randn(batch_size, 2, 20, 200, 200)  # Current events
+    event_t1 = torch.randn(batch_size, 2, 20, 200, 200)  # Next events  
+    imu_data = torch.randn(batch_size, 100, 6)           # IMU sequence
+    range_data = torch.randn(batch_size, 100, 1)         # Range sequence
+    velocity_gt = torch.randn(batch_size, 3)             # Optional ground truth
+    
+    # Training step
+    model.train()
+    optimizer.zero_grad()
+    
+    output = model(
+        event_tensor=event_t0,
+        imu_tensor=imu_data, 
+        range_tensor=range_data,
+        event_tensor_next=event_t1,
+        velocity_target=velocity_gt,
+        mode='train'
+    )
+    
+    # Backward pass
+    loss = output['total_loss']
+    loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+    optimizer.step()
+    
+    print(f"Total Loss: {loss.item():.4f}")
+    print(f"Velocity shape: {output['velocity_prediction'].shape}")
+    print(f"Flow shape: {output['flow_prediction'].shape}")
+    
+    return output
+
+# Inference example
+def example_inference():
+    """Example of inference with the dual-head model"""
+    model = create_model_with_flow()
+    model.eval()
+    
+    with torch.no_grad():
+        # Single sample
+        event_data = torch.randn(1, 2, 20, 200, 200)
+        imu_data = torch.randn(1, 100, 6)
+        range_data = torch.randn(1, 100, 1)
+        
+        output = model(event_data, imu_data, range_data, mode='eval')
+        
+        velocity = output['velocity_prediction']  # (1, 3)
+        flow_map = output['flow_prediction']      # (1, 2, 200, 200)
+        
+        print(f"Predicted velocity: {velocity.squeeze()}")
+        print(f"Flow map range: [{flow_map.min():.3f}, {flow_map.max():.3f}]")
+        
+        return velocity, flow_map
+
+if __name__ == "__main__":
+    # Run examples
+    print("Training example:")
+    example_training_step()
+    
+    print("\nInference example:")  
+    example_inference()

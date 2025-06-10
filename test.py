@@ -660,35 +660,35 @@ def animate_event_data_with_combined(events_data_sequence):
 if __name__ == "__main__":
     # --- Configuration ---
     DATAPATH = './elope_data' # Adjust as needed
-    TEST_SEQUENCE_ID = '0024' # A test sequence not used in training (e.g., the first test trajectory)
+    TEST_SEQUENCE_ID = '0010' # A test sequence not used in training (e.g., the first test trajectory)
     EXTRACT_INTERMEDIATE_FEATURES = False # Set to True if we want to extract event features
     USE_ATTENTION = True # Must match how the trained model was created
     VELOCITY_ONLY = True # Set to True for velocity-only training
     EVENT_ENCODER_METHOD = 'last_timestamp' # Method to encode events, e.g., 'last_timestamp', 'count', etc.
+    USE_PHYSICS_AWARE = True # Whether to use physics-aware IMU encoder
 
     INT_WINDOW_US = 1e5  # Integration window in microseconds
-    SEQ_LEN = 10 # Length of IMU sequence
+    SEQ_LEN = 5 # Length of IMU sequence
     H, W, T = 200, 200, 5  # Image dimensions and time steps
     PREDICTION_INTERVAL = 0.1
     
-    MODEL_PATH = f'model_integration_window_{INT_WINDOW_US}_imu_seq_len_{SEQ_LEN}_H_{H}_W_{W}_T_{T}_sample_interval_{EVENT_ENCODER_METHOD}.pth' 
+    MODEL_PATH = f'model_integration_window_{INT_WINDOW_US}_imu_seq_len_'\
+        f'{SEQ_LEN}_H_{H}_W_{W}_T_{T}_{EVENT_ENCODER_METHOD}_physics_aware_{USE_PHYSICS_AWARE}.pth'\
+        '_20250610_165813.pth'
 
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device for inference: {DEVICE}")
 
     # --- 1. Initialize DataLoader and Model ---
     data_loader = DataLoader(datapath=DATAPATH, velocity_only=VELOCITY_ONLY)
-    model = create_model(use_attention=USE_ATTENTION, device=DEVICE)
+    model = create_model(use_attention=USE_ATTENTION, device=DEVICE, use_physics_aware=USE_PHYSICS_AWARE)
 
     # --- 2. Load Trained Model Weights ---
     if os.path.exists(MODEL_PATH):
         print(f"Loading model weights from {MODEL_PATH}")
         model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE), strict=False)
     else:
-        print(f"Warning: Trained model weights not found at {MODEL_PATH}. Using randomly initialized model.")
-        print("Please train the model first or provide the correct path to weights.")
-        # Optionally, exit or raise an error if model weights are essential
-        # sys.exit(1)
+        raise ValueError(f"Warning: Trained model weights not found at {MODEL_PATH}.")
 
     # --- 3. Run Real-Time Prediction ---
 
