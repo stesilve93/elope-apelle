@@ -97,7 +97,7 @@ class DataLoader:
         #print(f"Timestamps for t_current {t_current:.4f}s at index {traj_idx} corresponding to {self.timestamps_full[traj_idx]:.4f}s")
         
         # Ensure t_current is aligned with a trajectory timestamp for ground truth
-        # Or, you can interpolate ground truth if t_current is arbitrary
+        # We could interpolate ground truth if t_current is arbitrary
         # For simplicity, we'll align it to the closest past trajectory timestamp.
         actual_t_current = self.timestamps_full[traj_idx]
         #print(f"Actual t_current aligned to trajectory timestamp: {actual_t_current:.4f}s at index {traj_idx}")
@@ -112,7 +112,7 @@ class DataLoader:
         current_events = self.events_full[events_mask]
         
         # Preprocess events to tensor
-        # Pass actual_t_current in microseconds for your preprocess_events logic
+        # Pass actual_t_current in microseconds for the preprocess_events logic
         events_tensor = self.preprocess_events(current_events, events_end_time_us,
                                                time_window=event_integration_window_us,
                                                H=H, W=W, T=T, method=event_encoder_method)

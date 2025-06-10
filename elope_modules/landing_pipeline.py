@@ -32,17 +32,17 @@ class LunarDescentPipeline:
         print(f"Accumulation time for event frames: {self.acc_time / 1e6} seconds")
         print("Initializing pipeline components...")
         
-        # Initialize EVFlowNet with random weights (in practice, you'd load pre-trained weights)
+        # Initialize EVFlowNet with random weights (in practice, we'd load pre-trained weights)
         print("Initializing EVFlowNet...")
         self._initialize_evflownet()
         
     def _initialize_evflownet(self):
         """Initialize EVFlowNet weights (placeholder for pre-trained weights)"""
-        # In practice, you would load pre-trained weights here:
+        # In practice, we would load pre-trained weights here:
         # self.flow_estimator.evflownet.load_state_dict(torch.load('evflownet_weights.pth'))
         
         print("EVFlowNet initialized with random weights")
-        print("Note: In practice, you should load pre-trained weights for better performance")
+        print("Note: In practice, load pre-trained weights for better performance")
         
     def load_pretrained_weights(self, weights_path):
         """Load pre-trained EVFlowNet weights"""

@@ -166,7 +166,7 @@ class EnhancedEventEncoder(nn.Module):
         self.dropout = nn.Dropout(0.2)
     
     def _make_layer(self, in_channels, out_channels, num_blocks, stride=1):
-        from elope_modules.emmnet import ResNet3DBlock  # Import your existing ResNet3DBlock
+        from elope_modules.emmnet import ResNet3DBlock  # Import the existing ResNet3DBlock
         layers = [ResNet3DBlock(in_channels, out_channels, stride)]
         for _ in range(1, num_blocks):
             layers.append(ResNet3DBlock(out_channels, out_channels))

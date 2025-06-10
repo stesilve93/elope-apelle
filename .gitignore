@@ -1,5 +1,6 @@
 /elope_data
 /weights
+/plots
 *__pycache__
 *.zip
 *.pth

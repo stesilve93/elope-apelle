@@ -263,7 +263,7 @@ class EventProcessor:
             y_coords = np.clip(y_coords, 0, H-1)
             
             # Convert polarities: assume 1 for positive, 0 for negative (or -1 for negative)
-            # Adjust this based on your data format
+            # Adjust this based on the data format
             pos_mask = polarities > 0
             neg_mask = polarities <= 0
             

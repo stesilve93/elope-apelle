@@ -26,12 +26,12 @@ train_sequences = all_sequences[:22]  # 80% for training
 val_sequences = all_sequences[22:]    # 20% for validation
 
 INT_WINDOW_US = 1e5  # Integration window in microseconds
-SEQ_LEN = 3  # Length of IMU sequence
+SEQ_LEN = 10  # Length of IMU sequence
 H, W, T = 200, 200, 5  # Image dimensions and time steps
 SAMPLE_INTERVAL = 1
-EVENT_ENCODER_METHOD = 'last_timestamp'
+EVENT_ENCODER_METHOD = 'count'
 
-CREATE_DATASET = False  # Set to True to create datasets
+CREATE_DATASET = True  # Set to True to create datasets
 if CREATE_DATASET:
     # Create datasets
     train_dataset = LunarDescentDataset(
@@ -79,7 +79,7 @@ print(f"Model has {sum(p.numel() for p in model.parameters())} parameters")
 trainer = LunarTrainer(model, train_loader, val_loader, device, velocity_only=VELOCITY_ONLY)
 
 # Train model
-trainer.train(num_epochs=100, save_path='best_lunar_pose_model_velocity.pth', max_patience=10)
+trainer.train(num_epochs=100, save_path=f'model_integration_window_{INT_WINDOW_US}_imu_seq_len_{SEQ_LEN}_H_{H}_W_{W}_T_{T}_{EVENT_ENCODER_METHOD}.pth', max_patience=10)
 trainer.plot_training(save_figure=True, figure_name_prefix='./plots/training/training')
 
 print("Training completed!")

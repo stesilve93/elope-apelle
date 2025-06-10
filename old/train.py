@@ -16,7 +16,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 # --- Model Initialization ---
-# Decide if you want to use attention
+# Attention or not?? boh :)
 use_attention_in_model = True # Set to False for simple concatenation
 model = create_model(use_attention=use_attention_in_model, device=device)
 print(model)
@@ -95,7 +95,7 @@ train_dataset = LunarDescentDataset(
 )
 
 # Create a PyTorch DataLoader
-batch_size = 64 # Or whatever fits your GPU memory
+batch_size = 64 # Or whatever fits the GPU memory
 train_dataloader = TorchDataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4) # num_workers for parallel data loading
 train_model(model, train_dataloader, criterion, optimizer, scheduler, num_epochs, device)
 print("Training complete!")

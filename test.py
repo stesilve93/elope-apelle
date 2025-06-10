@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 from typing import Dict, Tuple, Optional
 from sklearn.manifold import TSNE 
 import seaborn as sns 
+import matplotlib.animation as animation
+
 
 from elope_modules.dataloader import DataLoader
 from elope_modules.emmnetVelGru import create_model 
@@ -38,6 +40,7 @@ def run_realtime_prediction_and_extract_features(
     ground_truth_states = []
     prediction_times_s = []
     event_features_all = [] # To store event embeddings
+    event_sequence = [] # To store the sequence of events for visualization
 
     min_traj_time_s = data_loader_instance.timestamps_full[0]
     
@@ -66,7 +69,8 @@ def run_realtime_prediction_and_extract_features(
             t_current_s,
             event_integration_window_us=event_integration_window_us,
             imu_seq_len=imu_seq_len,
-            H=H, W=W, T=T
+            H=H, W=W, T=T,
+            event_encoder_method=event_encoder_method
         )
 
         if data_point is None:
@@ -74,12 +78,13 @@ def run_realtime_prediction_and_extract_features(
             current_t_idx += 1
             continue
         
-        visualize_event_data(data_point['events_tensor'].cpu(), current_time=t_current_s)
+        #visualize_event_data(data_point['events_tensor'].cpu(), current_time=t_current_s)
 
         event_t = data_point['events_tensor'].unsqueeze(0).to(device)
         imu_s = data_point['imu_sequence'].unsqueeze(0).to(device)
         range_s = data_point['rangemeter_sequence'].unsqueeze(0).to(device)
         gt_pv = data_point['ground_truth'].unsqueeze(0).to(device)
+        event_sequence.append((data_point['events_tensor'].cpu(), f"Time_{t_current_s}")) # Store the event tensor and timestamp
 
         with torch.no_grad():
             outputs = model(event_t, imu_s, range_s)
@@ -97,7 +102,7 @@ def run_realtime_prediction_and_extract_features(
     print(f"Finished predictions for sequence {sequence_id}. Total predictions: {len(predicted_states)}")
     
     return np.array(predicted_states), np.array(ground_truth_states), \
-           np.array(prediction_times_s), np.array(event_features_all)
+           np.array(prediction_times_s), np.array(event_features_all), event_sequence
 
 def run_realtime_prediction(
     model: nn.Module,
@@ -193,7 +198,8 @@ def run_realtime_prediction(
             t_current_s,
             event_integration_window_us=event_integration_window_us,
             imu_seq_len=imu_seq_len,
-            H=H, W=W, T=T
+            H=H, W=W, T=T,
+            event_encoder_method=event_encoder_method
         )
 
         if data_point is None:
@@ -308,7 +314,7 @@ def visualize_activation_maps(
     input_h, input_w = input_events_cpu.shape[2], input_events_cpu.shape[3]
 
     # Option 1: Sum ON and OFF events for a combined visualization
-    # You might want to abs() or just sum, depending on how you encoded polarity
+    # We might want to abs() or just sum, depending on how we encoded polarity
     # Assuming channel 0 is ON, channel 1 is OFF (or vice versa),
     # a simple sum might cancel out, so let's try sum of absolute values or sum if positive events are 1 and negative are -1.
     # For now, let's sum them as is, assuming event accumulation results in meaningful values.
@@ -437,23 +443,236 @@ def visualize_event_data(events_tensor, current_time):
         plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # Adjust layout to prevent title overlap
         plt.savefig(f"./plots/event_tensor_{current_time}_{feature_types[feature_channel_idx]}_{TEST_SEQUENCE_ID}.png", dpi=300) 
 
+def animate_event_data(events_data_sequence):
+    """
+    Creates an animation of event data over time.
+
+    Args:
+        events_data_sequence (list): A list of (events_tensor, current_time) tuples,
+                                     where events_tensor is (2, 2, H, W).
+    """
+    feature_types = ["Normalized Timestamps", "Freshness Values"]
+    polarities = ["Positive Events", "Negative Events"]
+
+    # Initialize figures for each feature type
+    fig_timestamps, axes_timestamps = plt.subplots(1, 2, figsize=(15, 6))
+    fig_freshness, axes_freshness = plt.subplots(1, 2, figsize=(15, 6))
+
+    ims_timestamps = [] # To store the image artists for timestamps figure
+    ims_freshness = []  # To store the image artists for freshness figure
+    # Set up initial plots for timestamps
+    for polarity_channel_idx in range(2):
+        ax = axes_timestamps[polarity_channel_idx]
+        # Use a dummy initial image, it will be updated
+        im = ax.imshow(np.zeros_like(events_data_sequence[0][0][polarity_channel_idx, 0, :, :]),
+                        cmap='Greys', origin='lower', vmin=0, vmax=1)
+        ims_timestamps.append(im)
+        ax.set_title(f"{polarities[polarity_channel_idx]}")
+        ax.set_xlabel("Width")
+        ax.set_ylabel("Height")
+        fig_timestamps.colorbar(im, ax=ax, orientation='vertical', fraction=0.046, pad=0.04)
+    fig_timestamps.suptitle(f"{feature_types[0]}", fontsize=16)
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+
+    # Set up initial plots for freshness
+    for polarity_channel_idx in range(2):
+        ax = axes_freshness[polarity_channel_idx]
+        im = ax.imshow(np.zeros_like(events_data_sequence[0][0][polarity_channel_idx, 1, :, :]),
+                        cmap='Greys', origin='lower', vmin=0, vmax=1)
+        ims_freshness.append(im)
+        ax.set_title(f"{polarities[polarity_channel_idx]}")
+        ax.set_xlabel("Width")
+        ax.set_ylabel("Height")
+        fig_freshness.colorbar(im, ax=ax, orientation='vertical', fraction=0.046, pad=0.04)
+    fig_freshness.suptitle(f"{feature_types[1]}", fontsize=16)
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+
+
+    def update(frame):
+        events_tensor, current_time = events_data_sequence[frame]
+
+        # Update timestamps figure
+        fig_timestamps.suptitle(f"{feature_types[0]} at Timestamp {current_time}", fontsize=16)
+        for polarity_channel_idx in range(2):
+            data_slice = events_tensor[polarity_channel_idx, 0, :, :]
+            ims_timestamps[polarity_channel_idx].set_array(data_slice)
+
+        # Update freshness figure
+        fig_freshness.suptitle(f"{feature_types[1]} at Timestamp {current_time}", fontsize=16)
+        for polarity_channel_idx in range(2):
+            data_slice = events_tensor[polarity_channel_idx, 1, :, :]
+            ims_freshness[polarity_channel_idx].set_array(data_slice)
+
+        return ims_timestamps + ims_freshness # Return all updated artists
+
+    # Create animations
+    num_frames = len(events_data_sequence)
+    ani_timestamps = animation.FuncAnimation(fig_timestamps, update, frames=num_frames, blit=True, repeat=False)
+    ani_freshness = animation.FuncAnimation(fig_freshness, update, frames=num_frames, blit=True, repeat=False)
+
+    # Save the animations
+    ani_timestamps.save(f'./plots/event_tensor_timestamps_animation.mp4', writer='ffmpeg', fps=5)
+    ani_freshness.save(f'./plots/event_tensor_freshness_animation.mp4', writer='ffmpeg', fps=5)
+
+    plt.close(fig_timestamps) # Close figures to prevent them from displaying
+    plt.close(fig_freshness)
+
+def animate_event_data_with_combined(events_data_sequence):
+    """
+    Creates an animation of event data over time, including combined visualization.
+
+    Parameters
+    ----------
+    events_data_sequence : list of tuples
+        A list of tuples containing the event tensors and corresponding timestamps.
+    """
+    feature_types = ["Normalized Timestamps", "Freshness Values"]
+    polarities = ["Positive Events", "Negative Events"]
+
+    # Initialize figures for each feature type (individual and combined)
+    fig_timestamps, axes_timestamps = plt.subplots(1, 2, figsize=(15, 6))
+    fig_freshness, axes_freshness = plt.subplots(1, 2, figsize=(15, 6))
+    fig_combined_timestamps, ax_combined_timestamps = plt.subplots(figsize=(10, 8))
+    fig_combined_freshness, ax_combined_freshness = plt.subplots(figsize=(10, 8))
+
+    ims_timestamps = []
+    ims_freshness = []
+    im_combined_timestamps = None
+    im_combined_freshness = None
+
+    # Get H, W from the first tensor in the sequence
+    _, _, H, W = events_data_sequence[0][0].shape
+
+    # Set up initial plots for timestamps (individual)
+    for polarity_channel_idx in range(2):
+        ax = axes_timestamps[polarity_channel_idx]
+        im = ax.imshow(np.zeros((H,W)), cmap='Greys', origin='lower', vmin=0, vmax=1)
+        ims_timestamps.append(im)
+        ax.set_title(f"{polarities[polarity_channel_idx]}")
+        ax.set_xlabel("Width")
+        ax.set_ylabel("Height")
+        fig_timestamps.colorbar(im, ax=ax, orientation='vertical', fraction=0.046, pad=0.04)
+    fig_timestamps.suptitle(f"{feature_types[0]}", fontsize=16)
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+
+    # Set up initial plots for freshness (individual)
+    for polarity_channel_idx in range(2):
+        ax = axes_freshness[polarity_channel_idx]
+        im = ax.imshow(np.zeros((H,W)), cmap='Greys', origin='lower', vmin=0, vmax=1)
+        ims_freshness.append(im)
+        ax.set_title(f"{polarities[polarity_channel_idx]}")
+        ax.set_xlabel("Width")
+        ax.set_ylabel("Height")
+        fig_freshness.colorbar(im, ax=ax, orientation='vertical', fraction=0.046, pad=0.04)
+    fig_freshness.suptitle(f"{feature_types[1]}", fontsize=16)
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    
+    # Set up initial plot for Combined Timestamps
+    im_combined_timestamps = ax_combined_timestamps.imshow(np.zeros((H,W)), cmap='RdBu_r', origin='lower', vmin=-1, vmax=1)
+    ax_combined_timestamps.set_title(f"Positive (Blue) and Negative (Red) {feature_types[0]}")
+    ax_combined_timestamps.set_xlabel("Width")
+    ax_combined_timestamps.set_ylabel("Height")
+    cbar_ts = fig_combined_timestamps.colorbar(im_combined_timestamps, ax=ax_combined_timestamps, orientation='vertical', fraction=0.046, pad=0.04)
+    cbar_ts.set_ticks([-1, -0.5, 0, 0.5, 1])
+    cbar_ts.set_ticklabels(['Strong Negative', 'Weak Negative', 'No Event', 'Weak Positive', 'Strong Positive'])
+    fig_combined_timestamps.suptitle(f"Combined {feature_types[0]}", fontsize=16)
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+
+    # Set up initial plot for Combined Freshness
+    im_combined_freshness = ax_combined_freshness.imshow(np.zeros((H,W)), cmap='RdBu_r', origin='lower', vmin=-1, vmax=1)
+    ax_combined_freshness.set_title(f"Positive (Blue) and Negative (Red) {feature_types[1]}")
+    ax_combined_freshness.set_xlabel("Width")
+    ax_combined_freshness.set_ylabel("Height")
+    cbar_fr = fig_combined_freshness.colorbar(im_combined_freshness, ax=ax_combined_freshness, orientation='vertical', fraction=0.046, pad=0.04)
+    cbar_fr.set_ticks([-1, -0.5, 0, 0.5, 1])
+    cbar_fr.set_ticklabels(['Strong Negative', 'Weak Negative', 'No Event', 'Weak Positive', 'Strong Positive'])
+    fig_combined_freshness.suptitle(f"Combined {feature_types[1]}", fontsize=16)
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+
+
+    def update(frame):
+        """
+        Update function to be called for each frame of the animation.
+
+        Parameters
+        ----------
+        frame : int
+            The current frame index.
+        """
+        events_tensor, current_time = events_data_sequence[frame]
+
+        # Update timestamps figure (individual)
+        fig_timestamps.suptitle(f"{feature_types[0]} at Timestamp {current_time}", fontsize=16)
+        for polarity_channel_idx in range(2):
+            data_slice = events_tensor[polarity_channel_idx, 0, :, :]
+            ims_timestamps[polarity_channel_idx].set_array(data_slice)
+
+        # Update freshness figure (individual)
+        fig_freshness.suptitle(f"{feature_types[1]} at Timestamp {current_time}", fontsize=16)
+        for polarity_channel_idx in range(2):
+            data_slice = events_tensor[polarity_channel_idx, 1, :, :]
+            ims_freshness[polarity_channel_idx].set_array(data_slice)
+
+        # Update Combined Timestamps
+        positive_ts = events_tensor[0, 0, :, :]
+        negative_ts = events_tensor[1, 0, :, :]
+        combined_ts_map = np.zeros_like(positive_ts)
+        combined_ts_map[positive_ts > 0] = positive_ts[positive_ts > 0]
+        combined_ts_map[negative_ts > 0] = -negative_ts[negative_ts > 0]
+        im_combined_timestamps.set_array(combined_ts_map)
+        fig_combined_timestamps.suptitle(f"Combined {feature_types[0]} at Timestamp {current_time}", fontsize=16)
+
+        # Update Combined Freshness
+        positive_fr = events_tensor[0, 1, :, :]
+        negative_fr = events_tensor[1, 1, :, :]
+        combined_fr_map = np.zeros_like(positive_fr)
+        combined_fr_map[positive_fr > 0] = positive_fr[positive_fr > 0]
+        combined_fr_map[negative_fr > 0] = -negative_fr[negative_fr > 0]
+        im_combined_freshness.set_array(combined_fr_map)
+        fig_combined_freshness.suptitle(f"Combined {feature_types[1]} at Timestamp {current_time}", fontsize=16)
+
+        return ims_timestamps + ims_freshness + [im_combined_timestamps, im_combined_freshness]
+
+
+    # Create animations
+    num_frames = len(events_data_sequence)
+    ani_timestamps = animation.FuncAnimation(fig_timestamps, update, frames=num_frames, blit=True, repeat=False)
+    ani_freshness = animation.FuncAnimation(fig_freshness, update, frames=num_frames, blit=True, repeat=False)
+    ani_combined_timestamps = animation.FuncAnimation(fig_combined_timestamps, update, frames=num_frames, blit=True, repeat=False)
+    ani_combined_freshness = animation.FuncAnimation(fig_combined_freshness, update, frames=num_frames, blit=True, repeat=False)
+
+
+    # Save the animations
+    # Use a consistent writer for all
+    writer = animation.FFMpegWriter(fps=5) 
+    ani_timestamps.save(f'./plots/event_tensor_timestamps_animation.mp4', writer=writer)
+    ani_freshness.save(f'./plots/event_tensor_freshness_animation.mp4', writer=writer)
+    ani_combined_timestamps.save(f'./plots/event_tensor_combined_timestamps_animation.mp4', writer=writer)
+    ani_combined_freshness.save(f'./plots/event_tensor_combined_freshness_animation.mp4', writer=writer)
+
+
+    plt.close(fig_timestamps)
+    plt.close(fig_freshness)
+    plt.close(fig_combined_timestamps)
+    plt.close(fig_combined_freshness)
 
 # --- Main execution block for testing ---
 if __name__ == "__main__":
     # --- Configuration ---
     DATAPATH = './elope_data' # Adjust as needed
-    MODEL_PATH = 'best_lunar_pose_model_velocity.pth_20250609_122954.pth' # Path to your trained model weights
     TEST_SEQUENCE_ID = '0024' # A test sequence not used in training (e.g., the first test trajectory)
-    EXTRACT_INTERMEDIATE_FEATURES = False # Set to True if you want to extract event features
-    USE_ATTENTION = True # Must match how your trained model was created
+    EXTRACT_INTERMEDIATE_FEATURES = False # Set to True if we want to extract event features
+    USE_ATTENTION = True # Must match how the trained model was created
     VELOCITY_ONLY = True # Set to True for velocity-only training
     EVENT_ENCODER_METHOD = 'last_timestamp' # Method to encode events, e.g., 'last_timestamp', 'count', etc.
 
     INT_WINDOW_US = 1e5  # Integration window in microseconds
-    SEQ_LEN = 3 # Length of IMU sequence
+    SEQ_LEN = 10 # Length of IMU sequence
     H, W, T = 200, 200, 5  # Image dimensions and time steps
     PREDICTION_INTERVAL = 0.1
     
+    MODEL_PATH = f'model_integration_window_{INT_WINDOW_US}_imu_seq_len_{SEQ_LEN}_H_{H}_W_{W}_T_{T}_sample_interval_{EVENT_ENCODER_METHOD}.pth' 
+
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device for inference: {DEVICE}")
 
@@ -467,7 +686,7 @@ if __name__ == "__main__":
         model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE), strict=False)
     else:
         print(f"Warning: Trained model weights not found at {MODEL_PATH}. Using randomly initialized model.")
-        print("Please train your model first or provide the correct path to weights.")
+        print("Please train the model first or provide the correct path to weights.")
         # Optionally, exit or raise an error if model weights are essential
         # sys.exit(1)
 
@@ -475,7 +694,7 @@ if __name__ == "__main__":
 
     if EXTRACT_INTERMEDIATE_FEATURES:
         print("\nStarting real-time prediction and feature extraction simulation...")
-        predicted_states, ground_truth_states, prediction_times, event_features = \
+        predicted_states, ground_truth_states, prediction_times, event_features, event_sequence = \
         run_realtime_prediction_and_extract_features(
             model=model,
             data_loader_instance=data_loader,
@@ -490,6 +709,9 @@ if __name__ == "__main__":
             event_encoder_method=EVENT_ENCODER_METHOD
             )
         
+        #animate_event_data(event_sequence)
+        animate_event_data_with_combined(event_sequence)
+
         print("\nVisualizing Event Feature Embeddings with t-SNE...")
 
         velocity_magnitudes = np.linalg.norm(ground_truth_states[:, 3:6], axis=1)
@@ -635,7 +857,7 @@ if __name__ == "__main__":
 
     # --- Add Activation Map Visualization Here ---
     print("\nAttempting to visualize activation maps.")
-    # You need a single data point to feed into the network for activations.
+    # We need a single data point to feed into the network for activations.
     # Let's take one from the beginning of the prediction sequence.
     # Make sure you have at least one prediction point
     if len(prediction_times) > 0:
@@ -651,9 +873,9 @@ if __name__ == "__main__":
         
         if sample_data_point:
             # Example: Visualize activations from the output of the first ResNet3DBlock (after conv1 and ReLU)
-            # The name refers to the layer within your model where you want to hook.
-            # In your EventEncoder, the `res_block1` is a ResNet3DBlock.
-            # If you want the activation *after* the first ReLU in `res_block1`:
+            # The name refers to the layer within the model where we want to hook.
+            # In the EventEncoder, the `res_block1` is a ResNet3DBlock.
+            # If we want the activation *after* the first ReLU in `res_block1`:
             def print_model_layers(model: nn.Module):
                 """
                 Prints all named modules (layers) in a PyTorch model and their types.

@@ -83,9 +83,8 @@ class ResNet3DBlock(nn.Module):
 
 
 class EventEncoder(nn.Module):
-    """ event encoder with better regularization"""
     """
-     event encoder with better regularization
+    Event encoder with better regularization
 
     Args:
     input_channels (int): The number of input channels. Defaults to 2.
@@ -106,7 +105,6 @@ class EventEncoder(nn.Module):
         self.maxpool = nn.MaxPool3d(kernel_size=(1,3,3), stride=(1,2,2), padding=(0,1,1))
         
         # ResNet blocks with increased dropout
-        # The dropout probability is increased to 0.2 to reduce overfitting
         self.layer1 = self._make_layer(64, 64, 2, stride=1, dropout=dropout)
         self.layer2 = self._make_layer(64, 128, 2, stride=(1,2,2), dropout=dropout)
         self.layer3 = self._make_layer(128, 256, 2, stride=(1,2,2), dropout=dropout)
@@ -127,8 +125,22 @@ class EventEncoder(nn.Module):
     
     def _make_layer(self, in_channels: int, out_channels: int, num_blocks: int, 
                    stride: int = 1, dropout: float = 0.1):
+        """
+        Creates a ResNet layer with a specified number of blocks and dropout.
+        
+        Args:
+            in_channels (int): Number of input channels.
+            out_channels (int): Number of output channels.
+            num_blocks (int): Number of ResNet blocks.
+            stride (int, optional): Stride of the convolutional layers. Defaults to 1.
+            dropout (float, optional): Dropout probability. Defaults to 0.1.
+        
+        Returns:
+            nn.Sequential: The ResNet layer.
+        """
         layers = [ResNet3DBlock(in_channels, out_channels, stride, dropout)]
         for _ in range(1, num_blocks):
+            # The dropout in the ResNet block is the same as the input dropout
             layers.append(ResNet3DBlock(out_channels, out_channels, dropout=dropout))
         return nn.Sequential(*layers)
     
@@ -149,7 +161,6 @@ class EventEncoder(nn.Module):
 
 
 class TransformerIMUEncoder(nn.Module):
-    """Transformer-based IMU encoder with temporal attention"""
     """
     Transformer-based IMU encoder with temporal attention
     
@@ -267,7 +278,6 @@ class GRURangemeterEncoder(nn.Module):
 
 
 class CrossModalAttention(nn.Module):
-    """ cross-modal attention with residual connections"""
     """
     Cross-modal attention module for fusion of event, IMU and rangemeter features
     
@@ -352,7 +362,6 @@ class CrossModalAttention(nn.Module):
 
 
 class RegularizedRegressor(nn.Module):
-    """Simplified regressor with strong regularization"""
     """
     Simplified regressor with strong regularization and skip connections.
     """
@@ -410,7 +419,7 @@ class RegularizedRegressor(nn.Module):
 
 
 class MultiModalVelocityEstimator(nn.Module):
-    """ multi-modal network with better regularization"""
+    """ Multi-modal network with better regularization"""
     def __init__(self, 
                  event_channels: int = 2,
                  event_output_dim: int = 128,
@@ -457,13 +466,21 @@ class MultiModalVelocityEstimator(nn.Module):
         self._init_weights()
     
     def _init_weights(self):
-        """Initialize weights properly to prevent overfitting"""
+        """
+        Initialize weights properly to prevent overfitting.
+
+        This function initializes weights using Xavier initialization with a smaller gain
+        (0.5) and kaiming_normal initialization for convolutional layers.
+        """
         for module in self.modules():
             if isinstance(module, nn.Linear):
-                nn.init.xavier_uniform_(module.weight, gain=0.5)  # Smaller gain
+                # Initialize weights using Xavier initialization with a smaller gain (0.5)
+                nn.init.xavier_uniform_(module.weight, gain=0.5)
                 if module.bias is not None:
+                    # Initialize bias to zero
                     nn.init.constant_(module.bias, 0)
             elif isinstance(module, (nn.Conv3d, nn.Conv2d, nn.Conv1d)):
+                # Initialize weights using kaiming_normal initialization
                 nn.init.kaiming_normal_(module.weight, mode='fan_out', nonlinearity='relu')
     
     def forward(self, event_tensor, imu_tensor, range_tensor):
