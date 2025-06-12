@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import datetime
 import seaborn as sns
 
-
+from pathlib import Path
 
 class LunarDescentDataset(Dataset):
     def __init__(self, data_loader_instance: DataLoader,
@@ -125,19 +125,21 @@ class LunarTrainer:
         self.best_val_loss = float('inf')
         
     def weighted_pose_loss(self, predictions: torch.Tensor, targets: torch.Tensor) -> Dict:
-        """
-        Compute weighted loss for position and velocity components
-        """
+        """Compute weighted loss for position and velocity components."""
+        
         if self.velocity_only:
+            
             # If only velocity is used, we only compute the loss for velocity
             vel_pred = predictions[:, :3]
             vel_target = targets[:, :3]
             vel_loss = self.criterion(vel_pred, vel_target)
+            
             return {
                 'total_loss': vel_loss,
                 'position_loss': torch.tensor(0.0, device=self.device),
                 'velocity_loss': vel_loss
             }
+            
         # If both position and velocity are used, compute both losses
         pos_pred, vel_pred = predictions[:, :3], predictions[:, 3:]
         pos_target, vel_target = targets[:, :3], targets[:, 3:]
@@ -157,11 +159,12 @@ class LunarTrainer:
     
     @staticmethod
     def compute_metrics(predictions: torch.Tensor, targets: torch.Tensor, velocity_only: bool, pos_gt: torch.Tensor) -> Dict:
-        """
-        Compute pose estimation metrics
-        """
+        """Compute pose estimation metrics."""
+        
         with torch.no_grad():
+            
             if not velocity_only:
+                
                 pos_pred, vel_pred = predictions[:, :3], predictions[:, 3:]
                 pos_target, vel_target = targets[:, :3], targets[:, 3:]
                 
@@ -179,6 +182,7 @@ class LunarTrainer:
                 square_vel_errors = (vel_pred[:,0] - vel_target[:,0]) ** 2 + \
                                     (vel_pred[:,1] - vel_target[:,1]) ** 2 + \
                                     (vel_pred[:,2] - vel_target[:,2]) ** 2
+                                    
                 elope_score =  (1/len(predictions))*torch.sum( (torch.sqrt(square_vel_errors))/pos_target[:, 2])
                 
                 return {
@@ -188,7 +192,9 @@ class LunarTrainer:
                     'vel_rmse_xyz': vel_rmse.cpu().numpy(),
                     'elope_score': elope_score.cpu().numpy()
                 }
+                
             else:
+                
                 # Only velocity is used, compute metrics for velocity
                 vel_pred = predictions[:, :3]
                 vel_target = targets[:, :3]
@@ -199,11 +205,12 @@ class LunarTrainer:
                 # Component-wise errors
                 vel_rmse = torch.sqrt(torch.mean((vel_pred - vel_target) ** 2, dim=0))
 
-                                # ELOPE metrics
+                # ELOPE metrics
                 square_vel_errors = (vel_pred[:,0] - vel_target[:,0]) ** 2 + \
                                     (vel_pred[:,1] - vel_target[:,1]) ** 2 + \
                                     (vel_pred[:,2] - vel_target[:,2]) ** 2
-                elope_score =  (1/len(predictions))*torch.sum( (torch.sqrt(square_vel_errors))/pos_gt[:, 2])
+                                    
+                elope_score =  (1/len(predictions))*torch.sum((torch.sqrt(square_vel_errors))/pos_gt[:, 2])
                 
                 return {
                     'velocity_error': vel_error.item(),
@@ -319,7 +326,7 @@ class LunarTrainer:
         
         return metrics
     
-    def train(self, num_epochs: int, save_path: str = 'best_model.pth', max_patience: int = 10):
+    def train(self, num_epochs: int, save_path: str='best_model.pth', max_patience: int=10):
         """
         Main training loop.
         
@@ -329,11 +336,18 @@ class LunarTrainer:
             max_patience (int): Maximum number of epochs to wait for improvement (default: 10).
         """
         print(f"Starting training for {num_epochs} epochs...")
+        
+        # Check if the folder in which to store the weights exists, else create it 
+        save_path = Path(save_path)
+        if not save_path.parent.exists(): 
+            save_path.parent.mkdir(parents=True)
 
         # Get current timestamp
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        
         # Create the figure filename with timestamp
-        save_path_model = f"{save_path}_{timestamp}.pth"
+        save_name = save_path.stem + f"_{timestamp}.pth"
+        save_path_model = str(save_path.parent / save_name)
         
         for epoch in range(num_epochs):
             start_time = time.time()
@@ -359,6 +373,7 @@ class LunarTrainer:
                 torch.save(self.model.state_dict(), save_path_model)
                 print(f"✓ New best model saved! Val loss: {val_loss:.4f}")
                 patience_counter = 0
+                
             else:
                 patience_counter+=1
                 print(f"✗ No improvement. Current best val loss: {self.best_val_loss:.4f}")
@@ -410,13 +425,20 @@ class LunarTrainer:
         plt.legend(fontsize=10)
         plt.grid(True, linestyle='--', alpha=0.7)
         plt.tight_layout()
-
+        
         if save_figure:
+                
             # Get current timestamp
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # Ensure the 
+            outpath = Path(f"{figure_name_prefix}_{timestamp}.png")
+            if not outpath.parent.exists(): 
+                # Ensure the output directory exists
+                outpath.parent.mkdir(parents=True)
+
             # Create the figure filename with timestamp
-            figure_filename = f"{figure_name_prefix}_{timestamp}.png"
-            plt.savefig(figure_filename, dpi=300)
-            print(f"Figure saved as: {figure_filename}")
+            plt.savefig(str(outpath), dpi=300)
+            print(f"Figure saved as: {str(outpath)}")
         
         plt.show()
