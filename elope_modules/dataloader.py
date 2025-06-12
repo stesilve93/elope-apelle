@@ -11,10 +11,10 @@ from elope_modules.event_proc import EventProcessor
 class DataLoader:
     """Data loader for elope dataset"""
     
-    def __init__(self, datapath: str = './elope_data', velocity_only: bool = True):
+    def __init__(self, datapath: str = './elope_data'):
+        
         self.datapath = datapath
         self.processor = EventProcessor()
-        self.velocity_only = True # True if only velocity is estimated, False if position is also estimated
 
         self.events_full = None
         self.timestamps_full = None
@@ -172,30 +172,15 @@ class DataLoader:
             rangemeter_sequence = rangemeter_sequence_raw
         
         # --- Ground Truth ---
-        # Ground truth is position and velocity at actual_t_current
-        if self.velocity_only:
-            # If only velocity is estimated, we take the last 6 values (vx, vy, vz)
-            ground_truth = self.trajectory_full[traj_idx, 3:6] # vx, vy, vz
-            position_gt = self.trajectory_full[traj_idx, 0:3] # x, y, z
-            #print(f"Ground truth at t_current {actual_t_current:.4f}s: Position {position_gt}, Velocity {ground_truth}")
-            return {
-                'events_tensor': torch.from_numpy(events_tensor),
-                'imu_sequence': torch.from_numpy(imu_sequence.astype(np.float32)),
-                'rangemeter_sequence': torch.from_numpy(rangemeter_sequence.astype(np.float32)),
-                'ground_truth': torch.from_numpy(ground_truth.astype(np.float32)),
-                'position_gt': torch.from_numpy(position_gt.astype(np.float32))
-            }
-        else:
-            # If position and velocity are estimated, we take the first 6 values (x, y, z, vx, vy, vz)
-            ground_truth = self.trajectory_full[traj_idx, 0:6] # x,y,z,vx,vy,vz
-            #print(f"Ground truth at t_current {actual_t_current:.4f}s: {ground_truth}")
-
-            return {
-                'events_tensor': torch.from_numpy(events_tensor),
-                'imu_sequence': torch.from_numpy(imu_sequence.astype(np.float32)),
-                'rangemeter_sequence': torch.from_numpy(rangemeter_sequence.astype(np.float32)),
-                'ground_truth': torch.from_numpy(ground_truth.astype(np.float32))
-            }
+        # Retrieve the position and velocity values (x, y, z, vx, vy, vz)
+        ground_truth = self.trajectory_full[traj_idx, :6]
+        
+        return {
+            'events_tensor': torch.from_numpy(events_tensor), 
+            'imu_sequence': torch.from_numpy(imu_sequence.astype(np.float32)), 
+            'rangemeter_sequence': torch.from_numpy(rangemeter_sequence.astype(np.float32)), 
+            'ground_truth': torch.from_numpy(ground_truth.astype(np.float32))
+        }
     
     def preprocess_events(self, events: np.ndarray, end_time: float,
                          time_window: float = 1e5,

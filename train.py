@@ -22,7 +22,7 @@ print(f"Using device: {device}")
 # Data preparation
 datapath = './elope_data'
 VELOCITY_ONLY = True  # Set to True for velocity-only training
-data_loader = DataLoader(datapath=datapath, velocity_only=VELOCITY_ONLY)
+data_loader = DataLoader(datapath=datapath)
 
 # Split sequences for train/val
 all_sequences = [str(i).zfill(4) for i in range(28)]
@@ -30,7 +30,7 @@ train_sequences = all_sequences[:22]  # 80% for training
 val_sequences = all_sequences[22:]    # 20% for validation
 
 # Path to the folder containing the desired dataset
-DATASET_PATH = Path("dataset") / "vel_only"
+DATASET_PATH = Path("dataset") / "posvel"
 
 # Path to the folder in which to store the model weights
 WEIGHTS_PATH = "weigths"
@@ -47,7 +47,7 @@ dataset_name = ("_dataset_integration_window_" \
                f"{INT_WINDOW_US}_imu_seq_len_{SEQ_LEN}_H_{H}_W_{W}_T_{T}" \
                f"_sample_interval_{SAMPLE_INTERVAL}_{EVENT_ENCODER_METHOD}.pth")
 
-CREATE_DATASET = False  # Set to True to create datasets
+CREATE_DATASET = True  # Set to True to create datasets
 if CREATE_DATASET:
     
     # Create datasets
