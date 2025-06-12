@@ -25,7 +25,6 @@ def run_realtime_prediction_and_extract_features(
     prediction_interval_s: float = 0.05,
     start_offset_s: float = 0.5,
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-    velocity_only: bool = True, # If True, only predict velocity (vx,vy,vz)
     event_encoder_method: str = 'last_timestamp' # Method to encode events, e.g., 'last_timestamp', 'count', etc.
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]: # Added event_features_all
     """
@@ -82,10 +81,12 @@ def run_realtime_prediction_and_extract_features(
         #visualize_event_data(data_point['events_tensor'].cpu(), current_time=t_current_s)
 
         event_t = data_point['events_tensor'].unsqueeze(0).to(device)
-        imu_s = data_point['imu_sequence'].unsqueeze(0).to(device)
+        imu_s   = data_point['imu_sequence'].unsqueeze(0).to(device)
         range_s = data_point['rangemeter_sequence'].unsqueeze(0).to(device)
-        gt_pv = data_point['ground_truth'].unsqueeze(0).to(device)
-        event_sequence.append((data_point['events_tensor'].cpu(), f"Time_{t_current_s}")) # Store the event tensor and timestamp
+        gt_pv   = data_point['ground_truth'].unsqueeze(0).to(device)
+        
+        # Store the event tensor and timestamp
+        event_sequence.append((data_point['events_tensor'].cpu(), f"Time_{t_current_s}")) 
 
         with torch.no_grad():
             outputs = model(event_t, imu_s, range_s)
@@ -115,7 +116,6 @@ def run_realtime_prediction(
     prediction_interval_s: float = 0.5, # How often to make a prediction (e.g., every 50ms)
     start_offset_s: float = 0.5, # Time to wait before first prediction (to fill LSTM buffers)
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-    velocity_only: bool = True, # If True, only predict velocity (vx,vy,vz)
     event_encoder_method: str = 'last_timestamp' # Method to encode events, e.g., 'last_timestamp', 'count', etc.
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
@@ -150,8 +150,6 @@ def run_realtime_prediction(
     predicted_states = []
     ground_truth_states = []
     prediction_times_s = []
-    if velocity_only:
-        position_states = []
 
     # Get the minimum timestamp from the trajectory to set an initial start time
     # This assumes trajectory timestamps are sorted and representative of the sequence
@@ -209,14 +207,12 @@ def run_realtime_prediction(
             current_t_idx += 1 # Move to next timestamp
             continue
         
-        # Unpack and move to device
-        event_t = data_point['events_tensor'].unsqueeze(0).to(device) # Add batch dimension
-        imu_s = data_point['imu_sequence'].unsqueeze(0).to(device)
+        # Unpack and move to device after adding batch dimension
+        event_t = data_point['events_tensor'].unsqueeze(0).to(device) 
+        imu_s   = data_point['imu_sequence'].unsqueeze(0).to(device)
         range_s = data_point['rangemeter_sequence'].unsqueeze(0).to(device)
-        gt_pv = data_point['ground_truth'].unsqueeze(0).to(device)
-        if velocity_only:
-            pos_gt = data_point['position_gt'].unsqueeze(0).to(device)
-
+        gt_pv   = data_point['ground_truth'].unsqueeze(0).to(device)
+        
         with torch.no_grad(): # No gradient calculations during inference
             outputs = model(event_t, imu_s, range_s)
             prediction = outputs['prediction']
@@ -224,11 +220,10 @@ def run_realtime_prediction(
         # Store the results
         print(f"Prediction at {t_current_s:.4f}s: {prediction.cpu().numpy().squeeze()}")
         predicted_states.append(prediction.cpu().numpy().squeeze()) # Remove batch dim
+        
         print(f"Ground truth at {t_current_s:.4f}s: {gt_pv.cpu().numpy().squeeze()}")
         ground_truth_states.append(gt_pv.cpu().numpy().squeeze())
         prediction_times_s.append(t_current_s)
-        if velocity_only:
-            position_states.append(pos_gt.cpu().numpy().squeeze())
 
         # Move to the next prediction timestamp
         # Find the next timestamp in the trajectory that is at least `prediction_interval_s` later
@@ -236,10 +231,13 @@ def run_realtime_prediction(
         current_t_idx = np.searchsorted(data_loader_instance.timestamps_full, next_t_s, side='left')
         
     print(f"Finished predictions for sequence {sequence_id}. Total predictions: {len(predicted_states)}")
-    if velocity_only:
-        return np.array(predicted_states), np.array(ground_truth_states), np.array(prediction_times_s), np.array(position_states)
-    else:
-        return np.array(predicted_states), np.array(ground_truth_states), np.array(prediction_times_s)
+    
+    return (
+        np.array(predicted_states), 
+        np.array(ground_truth_states), 
+        np.array(prediction_times_s)
+    )
+    
 
 def visualize_activation_maps(
     model: nn.Module,
@@ -659,6 +657,7 @@ def animate_event_data_with_combined(events_data_sequence):
 
 # --- Main execution block for testing ---
 if __name__ == "__main__":
+    
     # --- Configuration ---
     DATAPATH = './elope_data' # Adjust as needed
     TEST_SEQUENCE_ID = '0010' # A test sequence not used in training (e.g., the first test trajectory)
@@ -683,7 +682,7 @@ if __name__ == "__main__":
     print(f"Using device for inference: {DEVICE}")
 
     # --- 1. Initialize DataLoader and Model ---
-    data_loader = DataLoader(datapath=DATAPATH, velocity_only=VELOCITY_ONLY)
+    data_loader = DataLoader(datapath=DATAPATH)
     model = create_model(use_attention=USE_ATTENTION, device=DEVICE, use_physics_aware=USE_PHYSICS_AWARE)
 
     # --- 2. Load Trained Model Weights ---
@@ -697,7 +696,7 @@ if __name__ == "__main__":
 
     if EXTRACT_INTERMEDIATE_FEATURES:
         print("\nStarting real-time prediction and feature extraction simulation...")
-        predicted_states, ground_truth_states, prediction_times, event_features, event_sequence = \
+        predictions, targets, prediction_times, event_features, event_sequence = \
         run_realtime_prediction_and_extract_features(
             model=model,
             data_loader_instance=data_loader,
@@ -708,7 +707,6 @@ if __name__ == "__main__":
             prediction_interval_s=PREDICTION_INTERVAL,
             start_offset_s=0.5,
             device=DEVICE,
-            velocity_only=VELOCITY_ONLY,
             event_encoder_method=EVENT_ENCODER_METHOD
             )
         
@@ -717,7 +715,7 @@ if __name__ == "__main__":
 
         print("\nVisualizing Event Feature Embeddings with t-SNE...")
 
-        velocity_magnitudes = np.linalg.norm(ground_truth_states[:, 3:6], axis=1)
+        velocity_magnitudes = np.linalg.norm(targets[:, 3:6], axis=1)
 
         if len(event_features) < 30:
             print(f"Not enough event features ({len(event_features)}) for t-SNE visualization. Need at least 30.")
@@ -754,80 +752,72 @@ if __name__ == "__main__":
 
             print("t-SNE plot saved.")
     else:
+        
         print("\nStarting real-time prediction simulation...")
+        
+        predictions, targets, prediction_times = run_realtime_prediction(
+            model=model,
+            data_loader_instance=data_loader,
+            sequence_id=TEST_SEQUENCE_ID,
+            event_integration_window_us=INT_WINDOW_US, # Same as training
+            imu_seq_len=SEQ_LEN, # Same as training
+            H=H, W=W, T=T, # Same as training
+            prediction_interval_s=PREDICTION_INTERVAL, # Make a prediction every 50ms
+            start_offset_s=0.5, # Ensure at least 0.5s of data for LSTM warm-up
+            device=DEVICE,
+            event_encoder_method=EVENT_ENCODER_METHOD # Use the same method as training
+        )
+        
+        # Compute test metrics
+        test_metrics = lt.compute_metrics(
+            torch.tensor(predictions), 
+            torch.tensor(targets), 
+            velocity_only=VELOCITY_ONLY
+        )
+        
+        print(test_metrics)
+                    
         if VELOCITY_ONLY:
-            predicted_states, ground_truth_states, prediction_times, pos_states = run_realtime_prediction(
-                model=model,
-                data_loader_instance=data_loader,
-                sequence_id=TEST_SEQUENCE_ID,
-                event_integration_window_us=INT_WINDOW_US, # Same as training
-                imu_seq_len=SEQ_LEN, # Same as training
-                H=H, W=W, T=T, # Same as training
-                prediction_interval_s=PREDICTION_INTERVAL, # Make a prediction every 50ms
-                start_offset_s=0.5, # Ensure at least 0.5s of data for LSTM warm-up
-                device=DEVICE,
-                velocity_only=VELOCITY_ONLY, # Use the same setting as training
-                event_encoder_method=EVENT_ENCODER_METHOD # Use the same method as training
-            )
-
-            test_metrics = lt.compute_metrics(torch.tensor(predicted_states), torch.tensor(ground_truth_states), 
-                                              velocity_only=VELOCITY_ONLY, pos_gt=torch.tensor(pos_states))
             
-            print(test_metrics)
             print(f"Test Metrics - Vel Error: {test_metrics['velocity_error']:.2f}m/s", f"elope_score: {test_metrics['elope_score']:.4f}")
+            
         else:
-            predicted_states, ground_truth_states, prediction_times = run_realtime_prediction(
-                model=model,
-                data_loader_instance=data_loader,
-                sequence_id=TEST_SEQUENCE_ID,
-                event_integration_window_us=INT_WINDOW_US, # Same as training
-                imu_seq_len=SEQ_LEN, # Same as training
-                H=H, W=W, T=T, # Same as training
-                prediction_interval_s=PREDICTION_INTERVAL, # Make a prediction every 50ms
-                start_offset_s=0.5, # Ensure at least 0.5s of data for LSTM warm-up
-                device=DEVICE,
-                velocity_only=VELOCITY_ONLY # Use the same setting as training
-            )
-
-            test_metrics = lt.compute_metrics(torch.tensor(predicted_states), torch.tensor(ground_truth_states), 
-                                              velocity_only=VELOCITY_ONLY, pos_gt=torch.tensor(ground_truth_states))
-            print(test_metrics)
+            
             print(f"Test Metrics - Pos Error: {test_metrics['position_error']:.2f}m, "
                     f"Vel Error: {test_metrics['velocity_error']:.2f}m/s", f"elope_score: {test_metrics['elope_score']:.4f}")
 
-    if len(predicted_states) > 0:
+    if len(predictions) > 0:
+        
         print("\nPrediction Results:")
-        print(f"Total predictions: {len(predicted_states)}")
-        print(f"Shape of predicted_states: {predicted_states.shape}")
-        print(f"Shape of ground_truth_states: {ground_truth_states.shape}")
-
-        # Calculate Mean Squared Error (MSE) on the test sequence for the whole vector
-        mse_total = np.mean((predicted_states - ground_truth_states)**2)
-        print(f"Overall Mean Squared Error on test sequence {TEST_SEQUENCE_ID}: {mse_total:.6f}")
+        print(f"Total predictions: {len(predictions)}")
+        print(f"Shape of predictions: {predictions.shape}")
+        print(f"Shape of targets: {targets.shape}")
 
         if VELOCITY_ONLY:
+            
             # Calculate individual MSE for each component
-            component_labels = ['Vx (m/s)', 'Vy (m/s)', 'Vz (m/s)']
-            for i, label in enumerate(component_labels):
-                mse_component = np.mean((predicted_states[:, i] - ground_truth_states[:, i])**2)
-                print(f"MSE for {label}: {mse_component:.6f}")
-            # Create a 3x2 grid of subplots for position (x, y, z) and velocity (vx, vy, vz)
-            fig, axes = plt.subplots(1, 3, figsize=(15, 15)) # Increased figsize for better readability
-            axes = axes.flatten() # Flatten the 2D array of axes for easier iteration
+            mse_labels = ['Vx (m/s)', 'Vy (m/s)', 'Vz (m/s)']
+            
+            # State index offset
+            offset = 3
+               
+            fig, axes = plt.subplots(1, 3, figsize=(15, 15)) 
             plot_info = [
                 {'idx': 0, 'label': 'Vx', 'ylabel': 'Velocity (m/s)'},
                 {'idx': 1, 'label': 'Vy', 'ylabel': 'Velocity (m/s)'},
                 {'idx': 2, 'label': 'Vz', 'ylabel': 'Velocity (m/s)'}
             ]
-        else:
+            
+        else: 
+            
             # Calculate individual MSE for each component
-            component_labels = ['X (m)', 'Y (m)', 'Z (m)', 'Vx (m/s)', 'Vy (m/s)', 'Vz (m/s)']
-            for i, label in enumerate(component_labels):
-                mse_component = np.mean((predicted_states[:, i] - ground_truth_states[:, i])**2)
-                print(f"MSE for {label}: {mse_component:.6f}")
-            # Create a 3x2 grid of subplots for position (x, y, z) and velocity (vx, vy, vz)
-            fig, axes = plt.subplots(2, 3, figsize=(15, 15)) # Increased figsize for better readability
-            axes = axes.flatten() # Flatten the 2D array of axes for easier iteration
+            mse_labels = ['X (m)', 'Y (m)', 'Z (m)', 'Vx (m/s)', 'Vy (m/s)', 'Vz (m/s)']
+            
+            # State index offset
+            offset = 0
+            
+            # Create a 2x3 grid of subplots for position (x, y, z) and velocity (vx, vy, vz)
+            fig, axes = plt.subplots(2, 3, figsize=(15, 15)) 
             plot_info = [
                 {'idx': 0, 'label': 'X', 'ylabel': 'Position (m)'},
                 {'idx': 1, 'label': 'Y', 'ylabel': 'Position (m)'},
@@ -837,14 +827,36 @@ if __name__ == "__main__":
                 {'idx': 5, 'label': 'Vz', 'ylabel': 'Velocity (m/s)'}
             ]
 
+        # Calculate Mean Squared Error (MSE) on the test sequence for the whole vector
+        mse_total = np.mean((predictions - targets[:, offset:])**2)
+        print(f"Overall Mean Squared Error on test sequence {TEST_SEQUENCE_ID}: {mse_total:.6f}")
+        
+        # Compute the MSE errors 
+        for i, label in enumerate(mse_labels): 
+            mse_comp = np.mean((predictions[:,i] - targets[:, i+offset])**2)
+            print(f"MSE for {label}: {mse_comp:.6f}")
+        
+        # Flatten the 2D array of axes for easier iteration
+        axes = axes.flatten()
+        
+        # Display the data 
         for i, info in enumerate(plot_info):
             ax = axes[i]
             idx = info['idx']
             label = info['label']
             ylabel = info['ylabel']
 
-            ax.plot(prediction_times, ground_truth_states[:, idx], label=f'GT {label}', color='blue', linewidth=2, marker='o', markersize=3)
-            ax.plot(prediction_times, predicted_states[:, idx], label=f'Pred {label}', color='red', linestyle='--', linewidth=1.5, marker='x', markersize=3)
+            # Diplay groundtruth value
+            ax.plot(
+                prediction_times, targets[:, idx+offset], label=f'GT {label}', 
+                color='blue', linewidth=2, marker='o', markersize=3
+            )
+            
+            # Display network predictions
+            ax.plot(
+                prediction_times, predictions[:, idx], label=f'Pred {label}', 
+                color='red', linestyle='--', linewidth=1.5, marker='x', markersize=3
+            )
             
             ax.set_title(f'{label} Prediction vs. Ground Truth')
             ax.set_xlabel('Time (s)')
@@ -855,6 +867,7 @@ if __name__ == "__main__":
         plt.suptitle(f'6-DOF State Prediction vs. Ground Truth for Sequence {TEST_SEQUENCE_ID}', fontsize=16, y=1.02) # Add a main title
         plt.tight_layout(rect=[0, 0.03, 1, 0.98]) # Adjust layout to make space for suptitle
         plt.savefig(f"./plots/lunar_descent_predictions_{TEST_SEQUENCE_ID}.png", dpi=300) # Save with sequence ID in filename and higher DPI
+        
     else:
         print("No predictions were made. Check sequence ID, data path, or time offsets.")
 

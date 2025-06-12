@@ -33,7 +33,7 @@ val_sequences = all_sequences[22:]    # 20% for validation
 DATASET_PATH = Path("dataset") / "posvel"
 
 # Path to the folder in which to store the model weights
-WEIGHTS_PATH = "weigths"
+WEIGHTS_PATH = "weights"
 
 INT_WINDOW_US = 1e5  # Integration window in microseconds
 SEQ_LEN = 5  # Length of IMU sequence
@@ -47,7 +47,7 @@ dataset_name = ("_dataset_integration_window_" \
                f"{INT_WINDOW_US}_imu_seq_len_{SEQ_LEN}_H_{H}_W_{W}_T_{T}" \
                f"_sample_interval_{SAMPLE_INTERVAL}_{EVENT_ENCODER_METHOD}.pth")
 
-CREATE_DATASET = True  # Set to True to create datasets
+CREATE_DATASET = False  # Set to True to create datasets
 if CREATE_DATASET:
     
     # Create datasets

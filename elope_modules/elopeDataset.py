@@ -303,7 +303,7 @@ class LunarTrainer:
         all_targets = torch.cat(all_targets, dim=0)
         
         # Compute the global prediction metric
-        metrics = self.compute_metrics(all_predictions, all_predictions, self.velocity_only)
+        metrics = self.compute_metrics(all_predictions, all_targets, self.velocity_only)
         
         # Compute the validation loss
         val_loss = running_loss / len(self.val_loader)
