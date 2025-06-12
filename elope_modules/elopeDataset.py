@@ -75,8 +75,10 @@ class LunarDescentDataset(Dataset):
                         imu_seq_len=self.imu_seq_len,
                         H=self.H, W=self.W, T=self.T, event_encoder_method=event_encoder_method
                     )
+                    
                     if data_point:
                         self.samples.append(data_point)
+                        
             print(f"  -> Added {len(self.samples)} samples so far.")
         print(f"Finished preparing dataset. Total samples: {len(self.samples)}")
 
@@ -101,7 +103,7 @@ class LunarTrainer:
     
     def __init__(
         self, model, train_loader: DataLoader, val_loader: DataLoader=None, 
-        device: str ='cuda', velocity_only: bool=True
+        device: str ='cuda', velocity_only: bool=True, integral_loss: bool=False
     ):
         
         self.model = model
@@ -109,6 +111,9 @@ class LunarTrainer:
         self.val_loader = val_loader
         self.device = device
         self.velocity_only = velocity_only
+        
+        # True if the position values should be used to evaluate an integral loss.
+        self.integral_loss = integral_loss
         
         # Loss and optimizer
         self.criterion = nn.MSELoss()
@@ -128,35 +133,60 @@ class LunarTrainer:
         pos_target = targets[:, 0:3]
         vel_target = targets[:, 3:6]
         
-        if self.velocity_only:
-            
-            # If only velocity is used, we only compute the loss for velocity
-            vel_pred = predictions[:, :3]
-            vel_loss = self.criterion(vel_pred, vel_target)
-            
-            return {
-                'total_loss': vel_loss,
-                'position_loss': torch.tensor(0.0, device=self.device),
-                'velocity_loss': vel_loss
-            }
-            
-        # If both position and velocity are used, compute both losses
-        pos_pred = predictions[:, 0:3] 
-        vel_pred = predictions[:, 3:6]
-
-        pos_loss = self.criterion(pos_pred, pos_target)
-        vel_loss = self.criterion(vel_pred, vel_target)
+        loss = {} 
         
-        # Weight velocity more heavily than position
-        #TODO: Adjust the weights based on specific requirements
-        total_loss = pos_loss + 0.1*vel_loss
+        total_loss = torch.tensor(0.0, device=self.device)
         
-        return {
-            'total_loss': total_loss,
-            'position_loss': pos_loss,
-            'velocity_loss': vel_loss
-        }
-    
+        if not self.velocity_only: 
+            
+            # Weight for the velocity loss: velocity is weighted more heavily than pos
+            weight_vel = 0.1
+            
+            # Retrieve the preidctions
+            pos_pred = predictions[:, 0:3]
+            vel_pred = predictions[:, 3:6]
+            
+            # Compute and store the position loss
+            pos_loss = self.criterion(pos_pred, pos_target)
+            loss['position_loss'] = pos_loss 
+            
+            # Update the total loss with the position component 
+            total_loss += pos_loss
+        
+        else: 
+            
+            # Weight for the velocity loss 
+            weight_vel = 1.0
+        
+            # Retrieve the velocity predictions
+            vel_pred = predictions[:, 0:3]
+            
+            # Compute and store the position loss
+            loss['position_loss'] = torch.tensor(0.0, device=self.device)
+        
+        # Compute the velocity loss and update the total loss
+        vel_loss = self.criterion(vel_pred, vel_target)    
+        total_loss += weight_vel*vel_loss
+            
+        if self.integral_loss: 
+            
+            # TODO: this requires that I know the timings at which the predictions were made
+            integral_loss = torch.tensor(0.0, device=self.cuda)
+            # integral_loss = torch.trapezoid()
+            
+            # Compute an additional loss due to the integral of the position 
+            loss['integral_loss'] = integral_loss   
+            total_loss += integral_loss
+            
+        else: 
+            loss['integral_loss'] = torch.tensor(0.0, device=self.cuda)
+        
+        # Store the velocity and total loss 
+        loss['velocity_loss'] = vel_loss
+        loss['total_loss'] = total_loss 
+        
+        return loss
+        
     @staticmethod
     def compute_metrics(
         predictions: torch.Tensor, targets: torch.Tensor, velocity_only: bool
