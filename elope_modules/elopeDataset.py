@@ -95,7 +95,8 @@ class LunarDescentDataset(Dataset):
             sample['events_tensor'], 
             sample['imu_sequence'], 
             sample['rangemeter_sequence'],
-            sample['ground_truth']
+            sample['ground_truth'], 
+            sample['time']
         )
 
 
@@ -256,12 +257,13 @@ class LunarTrainer:
         running_vel_loss = 0.0
         num_batches = 0
         
-        for i, (events, imu, rangemeter, targets) in enumerate(self.train_loader):
+        for i, (events, imu, rangemeter, targets, times) in enumerate(self.train_loader):
             
             events = events.to(self.device)
             imu = imu.to(self.device)
             rangemeter = rangemeter.to(self.device)
             targets = targets.to(self.device)
+            times = times.to(self.device)
             
             self.optimizer.zero_grad()
             

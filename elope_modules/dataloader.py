@@ -179,7 +179,8 @@ class DataLoader:
             'events_tensor': torch.from_numpy(events_tensor), 
             'imu_sequence': torch.from_numpy(imu_sequence.astype(np.float32)), 
             'rangemeter_sequence': torch.from_numpy(rangemeter_sequence.astype(np.float32)), 
-            'ground_truth': torch.from_numpy(ground_truth.astype(np.float32))
+            'ground_truth': torch.from_numpy(ground_truth.astype(np.float32)),
+            'time': torch.tensor(np.float32(actual_t_current))
         }
     
     def preprocess_events(self, events: np.ndarray, end_time: float,
