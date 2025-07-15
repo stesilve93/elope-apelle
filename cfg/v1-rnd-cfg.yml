@@ -1,0 +1,47 @@
+
+# Path to the folder containing the original training data
+datapath: elope_data/train
+
+# Path to the folder in which to store the cached dataset model
+output_path: dataset/v1-rnd
+# Name prefix of the dataset
+output_name: v1-rnd
+
+# If true, once the dataset has been loaded, it will be saved to the output directory 
+# written above
+save_cache: True
+
+# If true, the program will first look for a dataset file in the output directory
+use_cached: True
+
+# Sampling interval along the trajectory. It determines how many state points are 
+# retrieved from that trajectory. 
+sample_interval: 1 
+
+# If true, at each training iteration, the batch samples will consists in sequential samples
+# extracted from a subset of a sequence. 
+sequential_samples: False
+
+# Number of samples per batch. 
+batch_size: 32 
+
+# If `sequential_samples` is True, it determines the minimum number of samples that 
+batch_interval: 8 
+
+# Lenght of the IMU sequence
+imu_sequence_length: 5
+
+events: 
+  
+  # Horizontal dimension of the image, in pixels.
+  width: 200
+  # Vertical dimension of the image, in pixels.
+  height: 200
+  # Time dimension for the event tensor (i.e., number of time bins)
+  time_bins: 200 
+
+  # Type of event encoding, either "count" or "last_timestamp"
+  encoder_method: last_timestamp 
+
+  # Duration of the window in which events are integrated, in microseconds
+  integration_window: 1e5

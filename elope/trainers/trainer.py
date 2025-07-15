@@ -5,7 +5,8 @@ import time
 import numpy as np 
 import matplotlib.pyplot as plt
 import seaborn as sns
-import torch 
+import torch
+import tqdm 
 
 from pathlib import Path 
 
@@ -61,7 +62,8 @@ class LunarTrainer:
         pos_target = targets[:, 3:6]
         vel_target = targets[:, 3:6]
         
-        vel_pred = predictions[:, 3:6]
+        # Retrieve the predicted velocities
+        vel_pred = predictions[:, 0:3] if self.velocity_only else predictions[:, 3:6]
         
         loss = {
             'position_loss': torch.tensor(0.0, device=self.device), 
@@ -203,7 +205,7 @@ class LunarTrainer:
             
             return metrics
     
-    def train_epoch(self) -> dict:
+    def train_epoch(self, epoch: int, num_epochs: int) -> dict:
         """Train for one epoch."""
         
         self.model.train()
@@ -213,8 +215,14 @@ class LunarTrainer:
         running_vel_loss = 0.0
         num_batches = 0
         
-        for i, (events, imu, rangemeter, targets, times) in enumerate(self.train_loader):
-            
+        # Create the bar to display current iterations
+        tbar = tqdm.tqdm(
+            self.train_loader, desc=f"       Epoch {epoch}/{num_epochs}", unit="i", 
+            ncols=90, miniters=5
+        )
+        
+        for i, (events, imu, rangemeter, targets, times) in enumerate(tbar):
+        
             times = times.to(self.device)
             targets = targets.to(self.device)
             rangemeter = rangemeter.to(self.device)
@@ -256,10 +264,9 @@ class LunarTrainer:
             running_vel_loss += loss_dict['velocity_loss'].item()
             num_batches += 1
             
-            if (i + 1) % 50 == 0:
-                avg_loss = running_loss / num_batches
-                LOGGER.info(f"Batch {i+1}/{len(self.train_loader)}, Loss: {avg_loss:.4f}")
-        
+            if i % tbar.miniters == 0:
+                tbar.set_postfix(avg_loss=running_loss/num_batches)
+            
         return {
             'total_loss': running_loss / num_batches,
             'position_loss': running_pos_loss / num_batches,
@@ -347,10 +354,9 @@ class LunarTrainer:
         save_path_model = str(save_path.parent / save_name)
         
         for epoch in range(num_epochs):
-            start_time = time.time()
             
             # Train
-            train_metrics = self.train_epoch()
+            train_metrics = self.train_epoch(epoch+1, num_epochs)
             self.train_losses.append(train_metrics['total_loss'])
             
             # Validate
@@ -368,37 +374,15 @@ class LunarTrainer:
             if val_loss < self.best_val_loss:
                 self.best_val_loss = val_loss
                 torch.save(self.model.state_dict(), save_path_model)
-                LOGGER.info(f"✓ New best model saved! Val loss: {val_loss:.4f}")
+                print(
+                    " "*6, f"New best model saved! Val. Loss: {val_loss:.4f} /", 
+                    f"Train Loss: {train_metrics['total_loss']:.4f}\n"
+                )
+                
                 patience_counter = 0
                 
             else:
                 patience_counter+=1
-                LOGGER.info(
-                    f"✗ No improvement. Current best val loss: {self.best_val_loss:.4f}"
-                )
-            
-            # Print epoch summary
-            epoch_time = time.time() - start_time
-            LOGGER.info("\n")
-            LOGGER.info(f"Epoch {epoch+1}/{num_epochs} ({epoch_time:.1f}s)")
-            LOGGER.info(f"Learning Rate: {self.optimizer.param_groups[0]['lr']:.6f}")
-            LOGGER.info(f"Train Loss: {train_metrics['total_loss']:.4f} "
-                        f"(Pos: {train_metrics['position_loss']:.4f}, "
-                        f"Vel: {train_metrics['velocity_loss']:.4f})")
-            
-            if val_metrics:
-                LOGGER.info(f"Val Loss: {val_loss:.4f}")
-                if not self.velocity_only:
-                    LOGGER.info(
-                        f"Val Metrics - Pos Error: {val_metrics['position_error']:.2f}m"
-                )
-
-                LOGGER.info(
-                    f"Val Metrics - Vel Error: {val_metrics['velocity_error']:.2f}m/s"
-                )
-                LOGGER.info(f"elope_score: {val_metrics['elope_score']:.4f}")
-            
-            print("\n\n")
 
             if patience_counter >= max_patience:
                 LOGGER.warning(" --> Early stopping triggered. No improvement for 10 epochs.")
