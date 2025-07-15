@@ -58,78 +58,90 @@ class LunarTrainer:
     def weighted_pose_loss(self, predictions: torch.Tensor, targets: torch.Tensor) -> dict:
         """Compute weighted loss for position and velocity components."""
         
-        # Retrieve the position and velocity ground-thruths 
-        pos_target = targets[:, 0:3]
+        pos_target = targets[:, 3:6]
         vel_target = targets[:, 3:6]
         
-        loss = {} 
+        vel_pred = predictions[:, 3:6]
         
-        total_loss = torch.tensor(0.0, device=self.device)
-        
-        # TODO: update losses computation using weights 
-        
-        # MSE Position loss 
-        # MSE Velocity loss 
-        # Integral loss 
-        # Relative MSE Position loss 
-        # Relative MSE Velocity loss 
-        # Relative MSE Integral loss 
-        # ELOPE score 
-        
-        if not self.velocity_only: 
-            
-            # Weight for the velocity loss: velocity is weighted more heavily than pos
-            weight_vel = 0.1
-            
-            # Retrieve the preidctions
-            pos_pred = predictions[:, 0:3]
-            vel_pred = predictions[:, 3:6]
-            
-            # Compute and store the position loss
-            pos_loss = self.criterion(pos_pred, pos_target)
-            loss['position_loss'] = pos_loss 
-            
-            # Update the total loss with the position component 
-            total_loss += pos_loss
-        
-        else: 
-            
-            # Weight for the velocity loss 
-            weight_vel = 1.0
-        
-            # Retrieve the velocity predictions
-            vel_pred = predictions[:, 0:3]
-            
-            # Compute and store the position loss
-            loss['position_loss'] = torch.tensor(0.0, device=self.device)
-        
-        # Compute the velocity loss and update the total loss
-        vel_loss = self.criterion(vel_pred, vel_target)    
-        total_loss += weight_vel*vel_loss
-        
-        # vel_loss_est = torch.sum(torch.norm(vel_pred-vel_target, dim=1)**2)/3/vel_pred.shape[0]
-        # print(vel_loss, vel_loss_est)
-        # raise RuntimeError
-            
-        if self.integral_loss: 
-            
-            # TODO: this requires that I know the timings at which the predictions were made
-            integral_loss = torch.tensor(0.0, device=self.device)
-            # integral_loss = torch.trapezoid()
-            
-            # Compute an additional loss due to the integral of the position 
-            loss['integral_loss'] = integral_loss   
-            total_loss += integral_loss
-            
-        else: 
-            loss['integral_loss'] = torch.tensor(0.0, device=self.device)
-            
-
-        # Store the velocity and total loss 
-        loss['velocity_loss'] = vel_loss
-        loss['total_loss'] = total_loss 
+        loss = {
+            'position_loss': torch.tensor(0.0, device=self.device), 
+            'velocity_loss': torch.tensor(0.0, device=self.device), 
+            'total_loss': loss_elope(vel_pred, vel_target, pos_target)
+        }
         
         return loss
+        
+        # Retrieve the position and velocity ground-thruths 
+        # pos_target = targets[:, 0:3]
+        
+        # loss = {} 
+        
+        # total_loss = torch.tensor(0.0, device=self.device)
+        
+        # # TODO: update losses computation using weights 
+        
+        # # MSE Position loss 
+        # # MSE Velocity loss 
+        # # Integral loss 
+        # # Relative MSE Position loss 
+        # # Relative MSE Velocity loss 
+        # # Relative MSE Integral loss 
+        # # ELOPE score 
+        
+        # if not self.velocity_only: 
+            
+        #     # Weight for the velocity loss: velocity is weighted more heavily than pos
+        #     weight_vel = 0.1
+            
+        #     # Retrieve the preidctions
+        #     pos_pred = predictions[:, 0:3]
+        #     vel_pred = predictions[:, 3:6]
+            
+        #     # Compute and store the position loss
+        #     pos_loss = self.criterion(pos_pred, pos_target)
+        #     loss['position_loss'] = pos_loss 
+            
+        #     # Update the total loss with the position component 
+        #     total_loss += pos_loss
+        
+        # else: 
+            
+        #     # Weight for the velocity loss 
+        #     weight_vel = 1.0
+        
+        #     # Retrieve the velocity predictions
+        #     vel_pred = predictions[:, 0:3]
+            
+        #     # Compute and store the position loss
+        #     loss['position_loss'] = torch.tensor(0.0, device=self.device)
+        
+        # # Compute the velocity loss and update the total loss
+        # vel_loss = self.criterion(vel_pred, vel_target)    
+        # total_loss += weight_vel*vel_loss
+        
+        # # vel_loss_est = torch.sum(torch.norm(vel_pred-vel_target, dim=1)**2)/3/vel_pred.shape[0]
+        # # print(vel_loss, vel_loss_est)
+        # # raise RuntimeError
+            
+        # if self.integral_loss: 
+            
+        #     # TODO: this requires that I know the timings at which the predictions were made
+        #     integral_loss = torch.tensor(0.0, device=self.device)
+        #     # integral_loss = torch.trapezoid()
+            
+        #     # Compute an additional loss due to the integral of the position 
+        #     loss['integral_loss'] = integral_loss   
+        #     total_loss += integral_loss
+            
+        # else: 
+        #     loss['integral_loss'] = torch.tensor(0.0, device=self.device)
+            
+
+        # # Store the velocity and total loss 
+        # loss['velocity_loss'] = vel_loss
+        # loss['total_loss'] = total_loss 
+        
+        # return loss
         
     @staticmethod
     def compute_metrics(
