@@ -1,26 +1,39 @@
+
+import datetime
+import time
+
+import matplotlib.pyplot as plt
+import numpy as np 
+import seaborn as sns
 import torch
-from torch.utils.data import Dataset, DataLoader as TorchDataLoader
 import torch.nn as nn
 import torch.optim as optim
-from torch.optim.lr_scheduler import ReduceLROnPlateau
-from elope_modules.dataloader import DataLoader
-from typing import Dict, Tuple
-import time
-import matplotlib.pyplot as plt
-import datetime
-import seaborn as sns
 
 from pathlib import Path
+from typing import Dict, Tuple
+
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.utils.data import Dataset, DataLoader as TorchDataLoader
+
+from elope_modules.dataloader import ElopeSequenceLoader
+
 
 class LunarDescentDataset(Dataset):
-    def __init__(self, data_loader_instance: DataLoader,
-                 sequence_ids: list,
-                 event_integration_window_us: float = 1e5,
-                 imu_seq_len: int = 50,
-                 H: int = 200, W: int = 200, T: int = 10,
-                 sample_interval: int = 10,
-                 velocity_only: bool = True,
-                 event_encoder_method: str = 'last_timestamp'):
+    def __init__(
+        self, 
+        data_loader_instance: ElopeSequenceLoader,
+        sequence_ids: list,
+        event_integration_window_us: float = 1e5,
+        imu_seq_len: int = 50,
+        H: int = 200, 
+        W: int = 200, 
+        T: int = 10,
+        batch_size: int=32,
+        batch_interval: int=8,
+        sample_interval: int = 10,
+        sequential_samples: bool = False,
+        event_encoder_method: str = 'last_timestamp'
+    ):
         """
         Custom PyTorch Dataset for lunar descent data.
 
@@ -48,40 +61,112 @@ class LunarDescentDataset(Dataset):
             sample_interval (int): How often to sample a timestamp from the trajectory
                                    (e.g., 10 means every 10th timestamp).
         """
-        self.data_loader = data_loader_instance
-        self.samples = []
-        self.event_integration_window_us = event_integration_window_us
-        self.imu_seq_len = imu_seq_len
+        
+        # Set the dimensions for the event tensor
         self.H = H
         self.W = W
         self.T = T
-        self.velocity_only = velocity_only
+        
+        self.data_loader = data_loader_instance
+        
+        # Store the events integration window (in us) and encoding method
+        self.event_integration_window = event_integration_window_us
+        self.event_encorder_method = event_encoder_method
+        
+        self.imu_seq_len = imu_seq_len
+        
+        self.nseq = len(sequence_ids)
+        
+        # Store the length of each sequence
+        self.seq_lengths = []
+        self.samples = []
+        
+        # Store the batch size and interval (i.e., separation between sequences of 
+        # consecutive samples in a single trajectory)
+        self.batch_size = batch_size
+        self.batch_interval = batch_interval
+        
+        # Store whether samples are meant to be sequential trajectory parts
+        self.sample_interval = sample_interval
+        self.sequential_samples = sequential_samples
 
         print("Preparing dataset samples...")
-        for seq_id in sequence_ids:
-            print(f"Loading sequence {seq_id}...")
+        
+        for (k, seq_idk) in enumerate(sequence_ids):
+            print(f"Loading sequence {seq_idk}...")
+            
             # Load the full sequence data into the DataLoader instance
-            self.data_loader.load_sequence(seq_id, source="train")
+            self.data_loader.load_sequence(seq_idk, source="train")
+            if self.data_loader.timestamps_full is None: 
+                continue
+            
+            # Retrieve the sequence subsamples and store their number
+            subsamples = self.get_sequence_samples()
+            self.seq_lengths.append(len(subsamples))
+            
+            if not self.sequential_samples: 
+                self.samples.append(subsamples)
+                print(f"  -> Added {len(self.samples)} samples so far.")
+                continue
+            
+            seq_len = len(subsamples)
+            if seq_len < self.batch_size: 
+                # If the sequence is shorter than the batch-size we can't really use it :)
+                continue
+            
+            for i in range(0, seq_len-self.batch_size+1, self.batch_interval):
+                
+                # Extract the subsamples for this sample 
+                samples_i = subsamples[i:i+self.batch_size]
+                
+                times_i, states_i, events_i, imu_i, rangemeter_i = [], [], [], [], []
+                for s in samples_i: 
+                    times_i.append(s['time'])
+                    events_i.append(s['events_tensor'])
+                    states_i.append(s['ground_truth'])
+                    imu_i.append(s['imu_sequence'])
+                    rangemeter_i.append(s['rangemeter_sequence'])
 
-            # Generate samples from this loaded sequence
-            # Iterate through timestamps from the loaded trajectory
-            # Use data_loader.timestamps_full which was populated by load_sequence
-            if self.data_loader.timestamps_full is not None:
-                for i in range(sample_interval, len(self.data_loader.timestamps_full), sample_interval):
-                    t_curr_s = self.data_loader.timestamps_full[i]
-                    data_point = self.data_loader.get_data_at_time(
-                        t_curr_s,
-                        event_integration_window_us=self.event_integration_window_us,
-                        imu_seq_len=self.imu_seq_len,
-                        H=self.H, W=self.W, T=self.T, event_encoder_method=event_encoder_method
-                    )
-                    
-                    if data_point:
-                        self.samples.append(data_point)
-                        
+                # Create the dictionary for the i-th sample by stacking all the information
+                # of the sub-sequence on the batch-dimension (i.e., 0).
+                self.samples.append({
+                    'time': torch.stack(times_i, dim=0),
+                    'events_tensor': torch.stack(events_i, dim=0), 
+                    'imu_sequence': torch.stack(imu_i, dim=0), 
+                    'rangemeter_sequence': torch.stack(rangemeter_i, dim=0), 
+                    'ground_truth': torch.stack(states_i, dim=0)
+                })
+            
             print(f"  -> Added {len(self.samples)} samples so far.")
+            
         print(f"Finished preparing dataset. Total samples: {len(self.samples)}")
 
+        # Compute the minimum and maximum sequence length
+        self.len_min = np.min(self.seq_lengths)
+        self.len_max = np.max(self.seq_lengths)
+
+    def get_sequence_samples(self) -> list: 
+        
+        subsamples = []
+        
+        # Iterate over the entire trajectory and collect samples
+        seq_len = len(self.data_loader.timestamps_full)
+        for i in range(0, seq_len, self.sample_interval):
+            
+            data_i = self.data_loader.get_data_at_time(
+                self.data_loader.timestamps_full[i], 
+                event_integration_window_us=self.event_integration_window, 
+                imu_seq_len=self.imu_seq_len, 
+                H=self.H, 
+                W=self.W, 
+                T=self.T, 
+                event_encoder_method=self.event_encorder_method
+            )
+            
+            if data_i: 
+                subsamples.append(data_i) 
+        
+        return subsamples
 
     def __len__(self):
         return len(self.samples)
@@ -99,19 +184,52 @@ class LunarDescentDataset(Dataset):
             sample['time']
         )
 
-
+class ElopeDataLoader(TorchDataLoader): 
+    
+    def __init__(self, dataset: LunarDescentDataset, **kwargs):
+        
+        # Retrieve the batch-size and make sure its coherent with the dataset settings
+        batch_size = kwargs.pop("batch_size")
+        
+        if dataset.sequential_samples:
+            
+            if dataset.batch_size != batch_size: 
+                raise RuntimeError(
+                     "Dataset is set to sequential mode but the specified "
+                     "batch size is different from the dataset one. "
+                    f"Found {batch_size}, expected {dataset.batch_size}"
+                )
+                
+            else: 
+                # The batch-size is embedded in the dataset samples to ensure the points 
+                # are sequential.
+                batch_size=1
+                
+        # Store whether samples are sequential
+        self.sequential_samples = dataset.sequential_samples
+        
+        # Initialize the baseline class
+        super().__init__(dataset, batch_size=batch_size, **kwargs)
+         
+    
+    
 class LunarTrainer:
     
     def __init__(
-        self, model, train_loader: DataLoader, val_loader: DataLoader=None, 
+        self, model, train_loader: ElopeDataLoader, val_loader: ElopeDataLoader=None, 
         device: str ='cuda', velocity_only: bool=True, integral_loss: bool=False
     ):
+        
+        # Ensure both datasets are set to the same sequential settings
+        assert train_loader.sequential_samples == val_loader.sequential_samples
         
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.device = device
         self.velocity_only = velocity_only
+        
+        self.sequential_samples = self.train_loader.sequential_samples
         
         # True if the position values should be used to evaluate an integral loss.
         self.integral_loss = integral_loss
@@ -172,7 +290,7 @@ class LunarTrainer:
         if self.integral_loss: 
             
             # TODO: this requires that I know the timings at which the predictions were made
-            integral_loss = torch.tensor(0.0, device=self.cuda)
+            integral_loss = torch.tensor(0.0, device=self.device)
             # integral_loss = torch.trapezoid()
             
             # Compute an additional loss due to the integral of the position 
@@ -180,7 +298,7 @@ class LunarTrainer:
             total_loss += integral_loss
             
         else: 
-            loss['integral_loss'] = torch.tensor(0.0, device=self.cuda)
+            loss['integral_loss'] = torch.tensor(0.0, device=self.device)
         
         # Store the velocity and total loss 
         loss['velocity_loss'] = vel_loss
@@ -259,12 +377,25 @@ class LunarTrainer:
         
         for i, (events, imu, rangemeter, targets, times) in enumerate(self.train_loader):
             
+            times = times.to(self.device)
+            targets = targets.to(self.device)
+            
+            rangemeter = rangemeter.to(self.device)
             events = events.to(self.device)
             imu = imu.to(self.device)
-            rangemeter = rangemeter.to(self.device)
-            targets = targets.to(self.device)
-            times = times.to(self.device)
             
+            if self.sequential_samples: 
+                # Remove from all the vectors the first dimension as the 'batch'
+                # dimension is already embedded in the samples sequentiality 
+                times = times.squeeze(0)
+                targets = targets.squeeze(0)
+                
+                rangemeter = rangemeter.squeeze(0)
+                events = events.squeeze(0)
+                imu = imu.squeeze(0)
+            
+            # print(imu.shape, rangemeter.shape, events.shape, times.shape, targets.shape)
+            # raise RuntimeError
             self.optimizer.zero_grad()
             
             # Forward pass
@@ -280,7 +411,6 @@ class LunarTrainer:
             
             # Gradient clipping for stability
             #torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-            
             self.optimizer.step()
             
             # Track losses

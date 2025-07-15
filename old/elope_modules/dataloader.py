@@ -8,7 +8,7 @@ from typing import Dict, Tuple, Optional
 
 from elope_modules.event_proc import EventProcessor
 
-class DataLoader:
+class ElopeSequenceLoader:
     """Data loader for elope dataset"""
     
     def __init__(self, datapath: str = './elope_data'):
