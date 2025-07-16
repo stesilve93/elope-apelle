@@ -217,7 +217,7 @@ class LunarTrainer:
         
         # Create the bar to display current iterations
         tbar = tqdm.tqdm(
-            self.train_loader, desc=f"       Epoch {epoch}/{num_epochs}", unit="i", 
+            self.train_loader, desc=f"       Epoch {epoch:02d}/{num_epochs:02d}", unit="i", 
             ncols=90, miniters=5
         )
         
@@ -265,7 +265,7 @@ class LunarTrainer:
             num_batches += 1
             
             if i % tbar.miniters == 0:
-                tbar.set_postfix(avg_loss=running_loss/num_batches)
+                tbar.set_postfix(avg_loss=f"{running_loss/num_batches:.3f}")
             
         return {
             'total_loss': running_loss / num_batches,
