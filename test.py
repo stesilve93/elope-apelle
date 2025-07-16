@@ -1,84 +1,94 @@
+
+import matplotlib.animation as animation
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns 
 import torch
 import torch.nn as nn
-import numpy as np
-import pandas as pd
-import os
-import matplotlib.pyplot as plt
-from typing import Dict, Tuple, Optional
-from sklearn.manifold import TSNE 
-import seaborn as sns 
-import matplotlib.animation as animation
 
 from pathlib import Path
+from typing import Dict, Tuple, Optional
 
-from elope_modules.dataloader import DataLoader
-from elope_modules.emmnetVelGru import create_model 
-from elope_modules.elopeDataset import LunarTrainer as lt
+from sklearn.manifold import TSNE 
+
+from elope.datasets import SequenceLoader, ElopeDataLoader, ElopeDataset
+from elope.trainers import LunarTrainer
+from elope.models.emmnetVelGru import MultiModalVelocityEstimator
+from elope.utils import LOGGER, load_yaml
+
 
 def run_realtime_prediction_and_extract_features(
     model: nn.Module,
-    data_loader_instance: DataLoader,
+    dataset_cfg: dict,
+    seq_loader: SequenceLoader,
     sequence_id: str,
-    event_integration_window_us: float = 1e5, # 100ms
-    imu_seq_len: int = 5,
-    H: int = 200, W: int = 200, T: int = 5,
-    prediction_interval_s: float = 0.05,
+    dt: float = 0.05,
     start_offset_s: float = 0.5,
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-    event_encoder_method: str = 'last_timestamp' # Method to encode events, e.g., 'last_timestamp', 'count', etc.
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]: # Added event_features_all
     """
     Runs "real-time" sequential prediction and extracts event features for analysis.
     """
     model.eval() # Set model to evaluation mode
     model.to(device)
-
-    print(f"Loading test sequence {sequence_id}...")
-    data_loader_instance.load_sequence(sequence_id)
     
-    predicted_states = []
-    ground_truth_states = []
-    prediction_times_s = []
-    event_features_all = [] # To store event embeddings
-    event_sequence = [] # To store the sequence of events for visualization
-
-    min_traj_time_s = data_loader_instance.timestamps_full[0]
+    # Retrieve all the dataset config values 
+    H = int(dataset_cfg["events"]["height"])
+    W = int(dataset_cfg["events"]["width"])
+    T = int(dataset_cfg["events"]["time_bins"])
     
-    avg_imu_interval = np.mean(np.diff(data_loader_instance.timestamps_full[:imu_seq_len+5]))
+    # Retrieve event parsing options
+    event_encoder_method = dataset_cfg["events"]["encoder_method"]
+    event_integration_window = float(dataset_cfg["events"]["integration_window"])
+    
+    imu_seq_len = int(dataset_cfg["imu_sequence_length"])
+
+    # Load the sequence
+    LOGGER.info(f"Loading test sequence: {sequence_id}.")
+    seq_loader.load_sequence(sequence_id)
+    
+    # Recover initial trajectory time
+    t_beg = seq_loader.timestamps_full[0]
+    
+    avg_imu_interval = np.mean(np.diff(seq_loader.timestamps_full[:imu_seq_len+5]))
+    
     required_min_offset_s = imu_seq_len * avg_imu_interval
     if start_offset_s < required_min_offset_s:
-        print(f"Warning: start_offset_s ({start_offset_s:.4f}s) is less than the recommended "
-              f"minimum for IMU sequence length ({required_min_offset_s:.4f}s). Adjusting.")
+        LOGGER.warning(
+            f"Warning: start_offset_s ({start_offset_s:.4f}s) is less than the recommended "
+            f"minimum for IMU sequence length ({required_min_offset_s:.4f}s). Adjusting."
+        )
         start_offset_s = required_min_offset_s * 1.1
 
-    initial_prediction_time_s = min_traj_time_s + start_offset_s
-    start_inference_idx = np.searchsorted(data_loader_instance.timestamps_full, initial_prediction_time_s, side='left')
+    # Compute the initial prediction time and index
+    t_idx = np.searchsorted(seq_loader.timestamps_full, t_beg + start_offset_s, side='left')
+    t0 = seq_loader.timestamps_full[t_idx]
     
-    if start_inference_idx >= len(data_loader_instance.timestamps_full):
-        print("No valid timestamps found for inference after initial offset.")
+    if t_idx >= len(seq_loader.timestamps_full):
+        LOGGER.warning("No valid timestamps found for inference after initial offset.")
         return np.array([]), np.array([]), np.array([]), np.array([])
     
-    current_t_idx = start_inference_idx
+    # These store event embeddings and sequence of events for visualization
+    event_features, event_sequence = [], []
+    predictions, targets, times = [], [], []
     
-    print(f"Starting predictions from timestamp {data_loader_instance.timestamps_full[current_t_idx]:.4f}s")
-    
-    while current_t_idx < len(data_loader_instance.timestamps_full):
-        t_current_s = data_loader_instance.timestamps_full[current_t_idx]
+    LOGGER.info(f"Starting predictions from timestamp {t0:.4f}s")
+    while t_idx < len(seq_loader.timestamps_full):
         
-        data_point = data_loader_instance.get_data_at_time(
-            t_current_s,
-            event_integration_window_us=event_integration_window_us,
-            imu_seq_len=imu_seq_len,
-            H=H, W=W, T=T,
-            event_encoder_method=event_encoder_method
+        # Retrieve the current trajectory time
+        tk = seq_loader.timestamps_full[t_idx]
+        
+        # Retrieve the current trajectory data
+        data_point = seq_loader.get_data_at_time(
+            tk, event_integration_window, event_encoder_method, imu_seq_len, H, W, T
         )
 
         if data_point is None:
-            print(f"Skipping prediction at {t_current_s:.4f}s due to insufficient data.")
-            current_t_idx += 1
+            LOGGER.warning(f"Skipping prediction at {tk:.4f}s due to insufficient data.")
+            t_idx += 1
             continue
         
-        #visualize_event_data(data_point['events_tensor'].cpu(), current_time=t_current_s)
+        # visualize_event_data(data_point['events_tensor'].cpu(), current_time=t_current_s)
 
         event_t = data_point['events_tensor'].unsqueeze(0).to(device)
         imu_s   = data_point['imu_sequence'].unsqueeze(0).to(device)
@@ -86,37 +96,42 @@ def run_realtime_prediction_and_extract_features(
         gt_pv   = data_point['ground_truth'].unsqueeze(0).to(device)
         
         # Store the event tensor and timestamp
-        event_sequence.append((data_point['events_tensor'].cpu(), f"Time_{t_current_s}")) 
+        event_sequence.append((data_point['events_tensor'].cpu(), f"Time_{tk}")) 
 
         with torch.no_grad():
+            # Run inference 
             outputs = model(event_t, imu_s, range_s)
-            prediction = outputs['prediction']
-            event_features = outputs['event_features'] # Extract event features
+            # Retrieve the prediction
+            pred_k = outputs['prediction']
+            # Extract event features
+            event_k = outputs['event_features'] 
 
-        predicted_states.append(prediction.cpu().numpy().squeeze())
-        ground_truth_states.append(gt_pv.cpu().numpy().squeeze())
-        prediction_times_s.append(t_current_s)
-        event_features_all.append(event_features.cpu().numpy().squeeze())
+        # Store all the data
+        predictions.append(pred_k.cpu().numpy().squeeze())
+        targets.append(gt_pv.cpu().numpy().squeeze())
+        times.append(tk)
+        event_features.append(event_k.cpu().numpy().squeeze())
 
-        next_t_s = t_current_s + prediction_interval_s
-        current_t_idx = np.searchsorted(data_loader_instance.timestamps_full, next_t_s, side='left')
+        # Compute the next time index
+        t_idx = np.searchsorted(seq_loader.timestamps_full, tk + dt, side='left')
         
-    print(f"Finished predictions for sequence {sequence_id}. Total predictions: {len(predicted_states)}")
+    LOGGER.info(
+        f"Finished predictions for sequence {sequence_id}. "
+        f"Total predictions: {len(predictions)}"
+    )
     
-    return np.array(predicted_states), np.array(ground_truth_states), \
-           np.array(prediction_times_s), np.array(event_features_all), event_sequence
+    return (np.array(predictions), np.array(targets),
+            np.array(times), np.array(event_features), event_sequence)
+
 
 def run_realtime_prediction(
     model: nn.Module,
-    data_loader_instance: DataLoader,
+    dataset_cfg: dict,
+    seq_loader: SequenceLoader,
     sequence_id: str,
-    event_integration_window_us: float = 1e5, # 100ms
-    imu_seq_len: int = 5,
-    H: int = 200, W: int = 200, T: int = 5,
-    prediction_interval_s: float = 0.5, # How often to make a prediction (e.g., every 50ms)
+    dt: float = 0.5, # How often to make a prediction (e.g., every 50ms)
     start_offset_s: float = 0.5, # Time to wait before first prediction (to fill LSTM buffers)
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-    event_encoder_method: str = 'last_timestamp' # Method to encode events, e.g., 'last_timestamp', 'count', etc.
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Runs "real-time" sequential prediction on a single test trajectory.
@@ -125,7 +140,7 @@ def run_realtime_prediction(
         model (nn.Module): The trained MultiModalVelocityEstimator model.
         data_loader_instance (DataLoader): An instantiated DataLoader object.
         sequence_id (str): The ID of the test sequence (e.g., '0040').
-        event_integration_window_us (float): Time window for events in microseconds.
+        event_integration_window (float): Time window for events in microseconds.
         imu_seq_len (int): Sequence length for IMU and rangemeter data.
         H, W, T: Dimensions for the event tensor.
         prediction_interval_s (float): Interval in seconds at which to generate a prediction.
@@ -141,70 +156,69 @@ def run_realtime_prediction(
     """
     model.eval() # Set model to evaluation mode
     model.to(device)
-
-    # Load the full test sequence data
-    print(f"Loading test sequence {sequence_id}...")
-    data_loader_instance.load_sequence(sequence_id, "train")
     
-    # Store results
-    predicted_states = []
-    ground_truth_states = []
-    prediction_times_s = []
-
-    # Get the minimum timestamp from the trajectory to set an initial start time
-    # This assumes trajectory timestamps are sorted and representative of the sequence
-    min_traj_time_s = data_loader_instance.timestamps_full[0]
+    # Retrieve all the dataset config values 
+    H = int(dataset_cfg["events"]["height"])
+    W = int(dataset_cfg["events"]["width"])
+    T = int(dataset_cfg["events"]["time_bins"])
     
+    # Retrieve event parsing options
+    event_encoder_method = dataset_cfg["events"]["encoder_method"]
+    event_integration_window = float(dataset_cfg["events"]["integration_window"])
+    
+    imu_seq_len = int(dataset_cfg["imu_sequence_length"])
+
+    # Load the sequence
+    LOGGER.info(f"Loading test sequence: {sequence_id}.")
+    seq_loader.load_sequence(sequence_id)
+    
+    # Recover initial trajectory time. This assumes trajectory timestamps are sorted 
+    # and representative of the sequence
+    t_beg = seq_loader.timestamps_full[0]
+    
+
     # Determine the actual start time for predictions
     # This ensures that for the first prediction, we have enough history for the LSTMs.
     # The minimum required history time is roughly imu_seq_len * (avg_time_between_imu_samples)
     # A simple way to approximate avg_time_between_imu_samples:
-    avg_imu_interval = np.mean(np.diff(data_loader_instance.timestamps_full[:imu_seq_len+5])) # Small sample for avg
+    avg_imu_interval = np.mean(np.diff(seq_loader.timestamps_full[:imu_seq_len+5])) # Small sample for avg
     
     # Ensure start_offset_s covers at least the LSTM sequence length
     required_min_offset_s = imu_seq_len * avg_imu_interval
     if start_offset_s < required_min_offset_s:
-        print(f"Warning: start_offset_s ({start_offset_s:.4f}s) is less than the recommended "
-              f"minimum for IMU sequence length ({required_min_offset_s:.4f}s). Adjusting.")
+        LOGGER.warning(
+            f"Warning: start_offset_s ({start_offset_s:.4f}s) is less than the recommended "
+            f"minimum for IMU sequence length ({required_min_offset_s:.4f}s). Adjusting."
+        )
         start_offset_s = required_min_offset_s * 1.1 # Add a small buffer
 
-    # Start predictions after an initial warm-up period
-    # Find the first timestamp in the trajectory that is at least `start_offset_s` past the beginning
-    initial_prediction_time_s = min_traj_time_s + start_offset_s
-    
-    # Iterate through timestamps, simulating real-time
-    # We will use data_loader_instance.timestamps_full as the master time index
-    # We'll skip timestamps until we reach initial_prediction_time_s
-    
-    # Find the starting index for inference
-    start_inference_idx = np.searchsorted(data_loader_instance.timestamps_full, initial_prediction_time_s, side='left')
+
+    # Compute the initial prediction time and index
+    t_idx = np.searchsorted(seq_loader.timestamps_full, t_beg + start_offset_s, side='left')
+    t0 = seq_loader.timestamps_full[t_idx]
     
     # Ensure we don't go out of bounds
-    if start_inference_idx >= len(data_loader_instance.timestamps_full):
-        print("No valid timestamps found for inference after initial offset.")
+    if t_idx >= len(seq_loader.timestamps_full):
+        LOGGER.warning("No valid timestamps found for inference after initial offset.")
         return np.array([]), np.array([]), np.array([])
     
-    # Select prediction timestamps at the specified interval
-    current_t_idx = start_inference_idx
+    # Store the results
+    predictions, targets, times = [], [], []
     
-    print(f"Starting predictions from timestamp {data_loader_instance.timestamps_full[current_t_idx]:.4f}s")
-    
-    while current_t_idx < len(data_loader_instance.timestamps_full):
-        t_current_s = data_loader_instance.timestamps_full[current_t_idx]
+    LOGGER.info(f"Starting predictions from timestamp {t0:.4f}s")
+    while t_idx < len(seq_loader.timestamps_full):
         
-        # Get the synchronized data for the current time
-        data_point = data_loader_instance.get_data_at_time(
-            t_current_s,
-            event_integration_window_us=event_integration_window_us,
-            imu_seq_len=imu_seq_len,
-            H=H, W=W, T=T,
-            event_encoder_method=event_encoder_method
+        # Retrieve the current trajectory time
+        tk = seq_loader.timestamps_full[t_idx]
+        
+        # Retrieve the current trajectory data
+        data_point = seq_loader.get_data_at_time(
+            tk, event_integration_window, event_encoder_method, imu_seq_len, H, W, T
         )
 
         if data_point is None:
-            # This can happen if t_current_s is out of bounds or data is insufficient
-            print(f"Skipping prediction at {t_current_s:.4f}s due to insufficient data.")
-            current_t_idx += 1 # Move to next timestamp
+            LOGGER.warning(f"Skipping prediction at {tk:.4f}s due to insufficient data.")
+            t_idx += 1
             continue
         
         # Unpack and move to device after adding batch dimension
@@ -213,30 +227,27 @@ def run_realtime_prediction(
         range_s = data_point['rangemeter_sequence'].unsqueeze(0).to(device)
         gt_pv   = data_point['ground_truth'].unsqueeze(0).to(device)
         
-        with torch.no_grad(): # No gradient calculations during inference
+        with torch.no_grad(): 
+            # Run inference and retrieve predictions
             outputs = model(event_t, imu_s, range_s)
-            prediction = outputs['prediction']
+            pred_k = outputs['prediction']
 
         # Store the results
-        print(f"Prediction at {t_current_s:.4f}s: {prediction.cpu().numpy().squeeze()}")
-        predicted_states.append(prediction.cpu().numpy().squeeze()) # Remove batch dim
+        times.append(tk)
+        predictions.append(pred_k.cpu().numpy().squeeze()) # Remove batch dim
+        LOGGER.info(f"Prediction at {tk:.4f}s: {predictions[-1]}")
         
-        print(f"Ground truth at {t_current_s:.4f}s: {gt_pv.cpu().numpy().squeeze()}")
-        ground_truth_states.append(gt_pv.cpu().numpy().squeeze())
-        prediction_times_s.append(t_current_s)
-
-        # Move to the next prediction timestamp
-        # Find the next timestamp in the trajectory that is at least `prediction_interval_s` later
-        next_t_s = t_current_s + prediction_interval_s
-        current_t_idx = np.searchsorted(data_loader_instance.timestamps_full, next_t_s, side='left')
+        targets.append(gt_pv.cpu().numpy().squeeze())
+        LOGGER.info(f"Ground truth at {tk:.4f}s: {targets[-1]}")
         
-    print(f"Finished predictions for sequence {sequence_id}. Total predictions: {len(predicted_states)}")
+        # Compute the next time index
+        t_idx = np.searchsorted(seq_loader.timestamps_full, tk + dt, side='left')
+        
+    LOGGER.info(
+        f"Finished predictions for sequence {sequence_id}. "
+        f"Total predictions: {len(predictions)}")
     
-    return (
-        np.array(predicted_states), 
-        np.array(ground_truth_states), 
-        np.array(prediction_times_s)
-    )
+    return np.array(predictions), np.array(targets), np.array(times)
     
 
 def visualize_activation_maps(
@@ -658,40 +669,58 @@ def animate_event_data_with_combined(events_data_sequence):
 # --- Main execution block for testing ---
 if __name__ == "__main__":
     
-    # --- Configuration ---
-    DATAPATH = './elope_data' # Adjust as needed
-    TEST_SEQUENCE_ID = '0010' # A test sequence not used in training (e.g., the first test trajectory)
-    EXTRACT_INTERMEDIATE_FEATURES = False # Set to True if we want to extract event features
-    USE_ATTENTION = True # Must match how the trained model was created
-    VELOCITY_ONLY = True # Set to True for velocity-only training
-    EVENT_ENCODER_METHOD = 'last_timestamp' # Method to encode events, e.g., 'last_timestamp', 'count', etc.
-    USE_PHYSICS_AWARE = False # Whether to use physics-aware IMU encoder
-
-    INT_WINDOW_US = 1e5  # Integration window in microseconds
-    SEQ_LEN = 5 # Length of IMU sequence
-    H, W, T = 200, 200, 5  # Image dimensions and time steps
+    # Use physics aware IMU encoder
+    USE_PHYSICS_AWARE = False 
+    
+    # Path to the folder from which to retrieve the weights 
+    WEIGHTS_PATH = Path("weights") 
+    
+    # Name of the file in which the weights are stored
+    WEIGHTS_NAME = "elope-emmnet-v1_20250715_225530.pth"
+    
+    # Path to the yaml file containing the dataset settings
+    DATASET_CONFIG = "cfg/v1-rnd-cfg.yml"
+    
+    # Path in which the sequence data is stored
+    DATAPATH = Path("elope_data") / "train"
+    
+    # True if the network should only provide the velocity as output
+    VELOCITY_ONLY = True
+        
+    # A test sequence not used in training (e.g., the first test trajectory)
+    TEST_SEQUENCE_ID = '0010' 
+    
+    # Set to True if we want to extract event features
+    EXTRACT_INTERMEDIATE_FEATURES = False 
+    
     PREDICTION_INTERVAL = 0.1
     
-    WEIGHTS_PATH = Path("weights")
+    # Device configuration 
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
+    LOGGER.info(f"Using device: {device}")
     
-    MODEL_PATH = WEIGHTS_PATH / f'model_integration_window_{INT_WINDOW_US}_imu_seq_len_'\
-        f'{SEQ_LEN}_H_{H}_W_{W}_T_{T}_{EVENT_ENCODER_METHOD}_physics_aware_{USE_PHYSICS_AWARE}_'\
-         '20250612_144522.pth'
+    # Create the sequence loader 
+    seq_loader = SequenceLoader(datapath=DATAPATH)
+    
+    # Create the model 
+    model = MultiModalVelocityEstimator.create_model(
+        use_attention=True, device=device, use_physics_aware=USE_PHYSICS_AWARE
+    )
+    
+    # Load the model weights
+    weights_fullpath = WEIGHTS_PATH / WEIGHTS_NAME
+    if weights_fullpath.exists(): 
+        LOGGER.info(f"Loading weights from: {weights_fullpath}")
+        data = torch.load(str(weights_fullpath), map_location=device) 
+        model.load_state_dict(data, strict=False)
         
-    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device for inference: {DEVICE}")
+    else: 
+        raise ValueError(f"Weights file {weights_fullpath} does not exist.")
 
-    # --- 1. Initialize DataLoader and Model ---
-    data_loader = DataLoader(datapath=DATAPATH)
-    model = create_model(use_attention=USE_ATTENTION, device=DEVICE, use_physics_aware=USE_PHYSICS_AWARE)
-
-    # --- 2. Load Trained Model Weights ---
-    if MODEL_PATH.exists(): 
-        print(f"Loading model weights from {MODEL_PATH}")
-        model.load_state_dict(torch.load(str(MODEL_PATH), map_location=DEVICE), strict=False)
-    else:
-        raise ValueError(f"Warning: Trained model weights not found at {MODEL_PATH}.")
-
+    
+    # Retrieve the settings from the YAML config 
+    dataset_cfg = load_yaml(DATASET_CONFIG)
+    
     # --- 3. Run Real-Time Prediction ---
 
     if EXTRACT_INTERMEDIATE_FEATURES:
@@ -699,16 +728,13 @@ if __name__ == "__main__":
         predictions, targets, prediction_times, event_features, event_sequence = \
         run_realtime_prediction_and_extract_features(
             model=model,
-            data_loader_instance=data_loader,
+            dataset_cfg=dataset_cfg,
+            seq_loader=seq_loader,
             sequence_id=TEST_SEQUENCE_ID,
-            event_integration_window_us=INT_WINDOW_US,
-            imu_seq_len=SEQ_LEN,
-            H=H, W=W, T=T,
-            prediction_interval_s=PREDICTION_INTERVAL,
+            dt=PREDICTION_INTERVAL,
             start_offset_s=0.5,
-            device=DEVICE,
-            event_encoder_method=EVENT_ENCODER_METHOD
-            )
+            device=device,
+        )
         
         #animate_event_data(event_sequence)
         animate_event_data_with_combined(event_sequence)
@@ -757,19 +783,16 @@ if __name__ == "__main__":
         
         predictions, targets, prediction_times = run_realtime_prediction(
             model=model,
-            data_loader_instance=data_loader,
+            dataset_cfg=dataset_cfg,
+            seq_loader=seq_loader,
             sequence_id=TEST_SEQUENCE_ID,
-            event_integration_window_us=INT_WINDOW_US, # Same as training
-            imu_seq_len=SEQ_LEN, # Same as training
-            H=H, W=W, T=T, # Same as training
-            prediction_interval_s=PREDICTION_INTERVAL, # Make a prediction every 50ms
+            dt=PREDICTION_INTERVAL, # Make a prediction every 50ms
             start_offset_s=0.5, # Ensure at least 0.5s of data for LSTM warm-up
-            device=DEVICE,
-            event_encoder_method=EVENT_ENCODER_METHOD # Use the same method as training
+            device=device,
         )
         
         # Compute test metrics
-        test_metrics = lt.compute_metrics(
+        test_metrics = LunarTrainer.compute_metrics(
             torch.tensor(predictions), 
             torch.tensor(targets), 
             velocity_only=VELOCITY_ONLY
@@ -879,10 +902,20 @@ if __name__ == "__main__":
     if len(prediction_times) > 0:
         # Get one data point from the data loader at a specific time
         # This will be the first valid prediction time
+                
+        # Retrieve all the dataset config values 
+        H = int(dataset_cfg["events"]["height"])
+        W = int(dataset_cfg["events"]["width"])
+        T = int(dataset_cfg["events"]["time_bins"])
+        
+        INT_WINDOW_US = float(dataset_cfg["events"]["integration_window"])
+        
+        SEQ_LEN = int(dataset_cfg["imu_sequence_length"])
+
         first_prediction_time_s = prediction_times[0]
-        sample_data_point = data_loader.get_data_at_time(
+        sample_data_point = seq_loader.get_data_at_time(
             first_prediction_time_s,
-            event_integration_window_us=INT_WINDOW_US,
+            event_integration_window=INT_WINDOW_US,
             imu_seq_len=SEQ_LEN,
             H=H, W=W, T=T
         )
@@ -905,11 +938,11 @@ if __name__ == "__main__":
                 print("-----------------------------------\n")
 
             #print_model_layers(model)
-            visualize_activation_maps(model, sample_data_point, 'layer1.1.conv1', feature_map_idx=3, device=DEVICE)
+            visualize_activation_maps(model, sample_data_point, 'layer1.1.conv1', feature_map_idx=3, device=device)
             # Or the activation *after* the initial block's MaxPool3d:
-            visualize_activation_maps(model, sample_data_point, 'layer3.1.conv1', feature_map_idx=4, device=DEVICE) # Index 3 is MaxPool3d if initial_block is Sequential
+            visualize_activation_maps(model, sample_data_point, 'layer3.1.conv1', feature_map_idx=4, device=device) # Index 3 is MaxPool3d if initial_block is Sequential
             # Or the output of an early convolution (e.g., the first one in res_block1):
-            visualize_activation_maps(model, sample_data_point, 'conv1', feature_map_idx=3, device=DEVICE)
+            visualize_activation_maps(model, sample_data_point, 'conv1', feature_map_idx=3, device=device)
 
         else:
             print("Could not retrieve a sample data point for activation visualization.")

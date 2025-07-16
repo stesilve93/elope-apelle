@@ -19,7 +19,7 @@ WEIGHTS_PATH = "weights"
 MODEL_NAME = "elope-emmnet-v1"
 
 # Path to the yaml file containing the dataset settings
-DATASET_CONFIG = "cfg/v1-seq-cfg.yml"
+DATASET_CONFIG = "cfg/v1-rnd-cfg.yml"
 
 # True if the network should only provide the velocity as output
 VELOCITY_ONLY = True
@@ -61,7 +61,7 @@ trainer = LunarTrainer(
 
 # Train the model 
 trainer.train( 
-    num_epochs=2, 
+    num_epochs=5, 
     save_path=increment_path(Path(WEIGHTS_PATH) / MODEL_NAME),
     max_patience=10
 )
