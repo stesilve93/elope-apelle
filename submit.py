@@ -15,51 +15,45 @@ from elope.utils import LOGGER, load_yaml, getfiles
     
 
 # Name of the file in which the weights are stored
-WEIGHTS_NAME = "elope-emmnet-v1_20250717_083150.pth"
+WEIGHTS_PATH = Path("weights") / "elope-emmnet-v1_20250717_164721" / "best.pt"
 
-# Path to the folder from which to retrieve the weights 
-WEIGHTS_PATH = Path("weights") 
-
-# Use physics aware IMU encoder
-USE_PHYSICS_AWARE = False 
+CFG_PATH_DATASET = "cfg/dataset/rng-5s.yml"
 
 # Path to the yaml file containing the dataset settings
-MODEL_CONFIG = "cfg/v1-rnd-cfg.yml"
+CFG_PATH_MODEL = "cfg/training/emmnet-v1.yml"
 
 # Path in which the sequence data is stored
 DATAPATH = Path("elope_data") / "test"
 
-model_cfg = load_yaml(MODEL_CONFIG)
+cfg_dataset = load_yaml(CFG_PATH_DATASET)
+cfg_model = load_yaml(CFG_PATH_MODEL)
 
 # Retrieve all the dataset config values 
-event_H = int(model_cfg["events"]["height"])
-event_W = int(model_cfg["events"]["width"])
-event_T = int(model_cfg["events"]["time_bins"])
+event_H = int(cfg_dataset["events"]["height"])
+event_W = int(cfg_dataset["events"]["width"])
+event_T = int(cfg_dataset["events"]["time_bins"])
 
 # Retrieve event parsing options
-event_encoder_method = model_cfg["events"]["encoder_method"]
-event_integration_window = float(model_cfg["events"]["integration_window"])
+event_encoder_method = cfg_dataset["events"]["encoder_method"]
+event_integration_window = float(cfg_dataset["events"]["integration_window"])
 
-imu_seq_len = int(model_cfg["imu_sequence_length"])
+imu_seq_len = int(cfg_dataset["imu_sequence_length"])
 
 # Device configuration 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
 LOGGER.info(f"Using device: {device}")
 
 # Create the model 
-model = MultiModalVelocityEstimator.create_model(
-    use_attention=True, device=device, use_physics_aware=USE_PHYSICS_AWARE
-)
+model = MultiModalVelocityEstimator.create_model(cfg_model, device=device)
 
 # Load model weights 
-weights_fullpath = WEIGHTS_PATH / WEIGHTS_NAME
-if weights_fullpath.exists(): 
-    LOGGER.info(f"Loading weights from: {weights_fullpath}")
-    data = torch.load(str(weights_fullpath), map_location=device) 
+if WEIGHTS_PATH.exists(): 
+    LOGGER.info(f"Loading weights from: {WEIGHTS_PATH}")
+    data = torch.load(str(WEIGHTS_PATH), map_location=device) 
     model.load_state_dict(data, strict=False)
     
 else: 
-    raise ValueError(f"Weights file {weights_fullpath} does not exist.")
+    raise ValueError(f"Weights file {WEIGHTS_PATH} does not exist.")
 
 # Set model to evaluation mode
 model.eval() 
