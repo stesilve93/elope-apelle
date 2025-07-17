@@ -793,16 +793,14 @@ if __name__ == "__main__":
             velocity_only=cfg_model["velocity_only"]
         )
         
-        print(test_metrics)
+        # Display the validation losses (e.g., each entry in the dictionary)
+        loss_names = tuple(test_metrics.keys())
+        loss_values = tuple([test_metrics[ln] for ln in loss_names])
+        
+        print(("Test Metrics: " + '%15s' * len(loss_names)) % loss_names)
+        print((" " * 14 + '%15.5f' * len(loss_names)) % loss_values)
+        print("\n")
                     
-        if cfg_model["velocity_only"]:
-            
-            print(f"Test Metrics - Vel Error: {test_metrics['velocity_error']:.2f}m/s", f"elope_score: {test_metrics['elope_score']:.4f}")
-            
-        else:
-            
-            print(f"Test Metrics - Pos Error: {test_metrics['position_error']:.2f}m, "
-                    f"Vel Error: {test_metrics['velocity_error']:.2f}m/s", f"elope_score: {test_metrics['elope_score']:.4f}")
 
     if len(predictions) > 0:
         
