@@ -17,7 +17,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from elope.datasets import ElopeDataLoader
 from elope.utils import LOGGER, load_yaml
 
-from .losses import loss_elope, loss_mse_rel
+from .losses import loss_elope, loss_mse_abs, loss_mse_rel
 
 class LunarTrainer: 
     
@@ -68,7 +68,7 @@ class LunarTrainer:
     def weighted_pose_loss(self, predictions: torch.Tensor, targets: torch.Tensor) -> dict:
         """Compute weighted loss for position and velocity components."""
         
-        pos_target = targets[:, 3:6]
+        pos_target = targets[:, 0:3]
         vel_target = targets[:, 3:6]
         
         # Retrieve the predicted velocities
@@ -77,8 +77,7 @@ class LunarTrainer:
         loss = {
             'position_loss': torch.tensor(0.0, device=self.device), 
             'velocity_loss': torch.tensor(0.0, device=self.device), 
-            # 'total_loss': loss_elope(vel_pred, vel_target, pos_target)
-            'total_loss': loss_elope(vel_pred, vel_target)
+            'total_loss': loss_elope(vel_pred, vel_target, pos_target)
         }
         
         return loss
@@ -176,49 +175,26 @@ class LunarTrainer:
                 pos_pred = predictions[:, 0:3]
                 vel_pred = predictions[:, 3:6]
                 
-                err_pos = pos_pred - pos_target
-                
-                # Position error (L2 norm)
-                pos_error = torch.norm(err_pos, dim=1).mean()
-                
-                # Component-wise RMSE errors
-                pos_rmse = torch.sqrt(torch.mean(err_pos**2, dim=0))
-
-                # Update the position metrics
-                metrics["position_error"] = pos_error.item(), 
-                metrics["pos_rmse_xyz"] = pos_rmse.cpu().numpy() 
+                # Compute the position absolute and relative MSE 
+                metrics["pos_mse_abs"] = loss_mse_abs(pos_pred, pos_target)
+                metrics["pos_mse_rel"] = loss_mse_rel(pos_pred, pos_target)
                 
             else:
                 
                 # Retrieve the velocity predictions
                 vel_pred = predictions[:, 0:3]
             
-            # # Compute velocity error 
-            # err_vel = (vel_pred - vel_target)**2
-                
-            # # Compute the velocity MSE 
-            # vel_mse_abs = torch.norm(err_vel) 
-            # vel_mse_rel = 
             
-            # # Compute the relative velocity MSE 
+            # Compute the velocity absolute and relative MSE
+            vel_mse_abs = loss_mse_abs(vel_pred, vel_target) 
+            vel_mse_rel = loss_mse_rel(vel_pred, vel_target)
             
-                
-            # Velocity error 
-            err_vel = vel_pred - vel_target
-            err_vel_norm = torch.norm(err_vel, dim=1)
-            
-            # Velocity error (L2 norm)
-            vel_error = err_vel_norm.mean()
-            
-            # Velocity RMSE 
-            vel_rmse = torch.sqrt(torch.mean(err_vel**2, dim=0))
-                
             # ELOPE metrics
             elope_score = loss_elope(vel_pred, vel_target, pos_target)
             
             # Store the remaining velocity-related metrics
-            metrics["velocity_error"] = vel_error.item() 
-            metrics["vel_rmse_xyz"] = vel_rmse.cpu().numpy() 
+            metrics["vel_mse_abs"] = vel_mse_abs.cpu().numpy()
+            metrics["vel_mse_rel"] = vel_mse_rel.cpu().numpy() 
             metrics["elope_score"] = elope_score.cpu().numpy() 
             
             return metrics
@@ -391,19 +367,12 @@ class LunarTrainer:
                 val_loss = train_metrics['total_loss']
                 loss_metrics = train_metrics
             
-            # Display the validation losses (e.g., each entry in the dictionary)
-            # loss_names = tuple(loss_metrics.keys())
-            # loss_values = tuple([loss_metrics[ln] for ln in loss_names])
-            
-            # print((" " * 6 + '%15s' * len(loss_names)) % loss_names)
-            # print((" " * 6 + '%15.5f' * len(loss_names)) % loss_values)
-            
             # Learning rate scheduling
             self.scheduler.step(val_loss)
             
             # Check whether we are at a checkpoint for saving the weights
             if (epoch % ckp_epochs) == 0:
-                torch.save(self.model.state_dict(), save_path_model / f"{epoch}.pt")
+                torch.save(self.model.state_dict(), save_path_model / f"{epoch}.pth")
                 print(
                     " "*6, f"Model weights saved! Val. Loss: {val_loss:.4f} / ", 
                     f"Train Loss: {train_metrics['total_loss']:.4f}"
@@ -412,16 +381,24 @@ class LunarTrainer:
             # Save best model
             if val_loss < self.best_val_loss:
                 self.best_val_loss = val_loss
-                torch.save(self.model.state_dict(), save_path_model / "best.pt")
+                torch.save(self.model.state_dict(), save_path_model / "best.pth")
                 print(
                     " "*6, f"New best model saved! Val. Loss: {val_loss:.4f} /", 
-                    f"Train Loss: {train_metrics['total_loss']:.4f}\n"
+                    f"Train Loss: {train_metrics['total_loss']:.4f}"
                 )
                 
                 patience_counter = 0
                 
             else:
                 patience_counter += 1
+            
+            # Display the validation losses (e.g., each entry in the dictionary)
+            loss_names = tuple(loss_metrics.keys())
+            loss_values = tuple([loss_metrics[ln] for ln in loss_names])
+            
+            print((" " * 6 + '%15s' * len(loss_names)) % loss_names)
+            print((" " * 6 + '%15.5f' * len(loss_names)) % loss_values)
+            print("\n")
 
             if patience_counter >= max_patience:
                 LOGGER.warning("Early stopping triggered. No improvement for 10 epochs.")
