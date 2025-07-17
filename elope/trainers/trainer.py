@@ -17,7 +17,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from elope.datasets import ElopeDataLoader
 from elope.utils import LOGGER
 
-from .losses import loss_elope
+from .losses import loss_elope, loss_mse_rel
 
 class LunarTrainer: 
     
@@ -68,7 +68,8 @@ class LunarTrainer:
         loss = {
             'position_loss': torch.tensor(0.0, device=self.device), 
             'velocity_loss': torch.tensor(0.0, device=self.device), 
-            'total_loss': loss_elope(vel_pred, vel_target, pos_target)
+            # 'total_loss': loss_elope(vel_pred, vel_target, pos_target)
+            'total_loss': loss_mse_rel(vel_pred, vel_target)
         }
         
         return loss

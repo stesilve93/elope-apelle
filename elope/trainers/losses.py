@@ -20,9 +20,17 @@ def mse_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     
     squared_error = (pred - target)**2
     torch.sum()
+
     
+def loss_mse_rel(pred: torch.Tensor, target: torch.Tensor) -> torch.tensor: 
+    # DOCME
+    # TODO 
     
+    mse = torch.sum((pred - target)**2, dim=1)
+    mag = torch.sum(target**2, dim=1)
     
+    return torch.sum(mse/mag)/target.shape[0]
+
     
 def loss_elope(
     vel_input: torch.Tensor, vel_target: torch.Tensor, pos_target: torch.Tensor
