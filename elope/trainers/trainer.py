@@ -15,15 +15,15 @@ from torch import optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from elope.datasets import ElopeDataLoader
-from elope.utils import LOGGER
+from elope.utils import LOGGER, load_yaml
 
 from .losses import loss_elope, loss_mse_rel
 
 class LunarTrainer: 
     
     def __init__(
-        self, model, train_loader: ElopeDataLoader, val_loader: ElopeDataLoader=None, 
-        device: str ='cuda', velocity_only: bool=True, integral_loss: bool=False
+        self, model_cfg: str | Path | dict, model: nn.Module, train_loader: ElopeDataLoader, 
+        val_loader: ElopeDataLoader=None, device: str ='cuda', integral_loss: bool=False
     ):
         
         # Ensure both datasets are set to the same sequential settings. This check is needed 
@@ -32,17 +32,26 @@ class LunarTrainer:
         
         assert train_loader.sequential_samples == val_loader.sequential_samples
         
+        # Retrieve the model configuration
+        if isinstance(model_cfg, (str | Path)): 
+            model_cfg = load_yaml(model_cfg)
+        
+        # Store the configuration for the model
+        self.cfg = model_cfg 
+        self.velocity_only = bool(self.cfg["velocity_only"])
+
+        # Store the network model 
         self.model = model
+
+        # Store the dataset loaders
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.device = device
-        self.velocity_only = velocity_only
         
         self.sequential_samples = self.train_loader.sequential_samples
         
         # True if the position values should be used to evaluate an integral loss.
         self.integral_loss = integral_loss
-        
         
         # Loss and optimizer
         self.criterion = nn.MSELoss()
@@ -69,7 +78,7 @@ class LunarTrainer:
             'position_loss': torch.tensor(0.0, device=self.device), 
             'velocity_loss': torch.tensor(0.0, device=self.device), 
             # 'total_loss': loss_elope(vel_pred, vel_target, pos_target)
-            'total_loss': loss_mse_rel(vel_pred, vel_target)
+            'total_loss': loss_elope(vel_pred, vel_target)
         }
         
         return loss
@@ -183,6 +192,16 @@ class LunarTrainer:
                 
                 # Retrieve the velocity predictions
                 vel_pred = predictions[:, 0:3]
+            
+            # # Compute velocity error 
+            # err_vel = (vel_pred - vel_target)**2
+                
+            # # Compute the velocity MSE 
+            # vel_mse_abs = torch.norm(err_vel) 
+            # vel_mse_rel = 
+            
+            # # Compute the relative velocity MSE 
+            
                 
             # Velocity error 
             err_vel = vel_pred - vel_target
@@ -196,8 +215,6 @@ class LunarTrainer:
                 
             # ELOPE metrics
             elope_score = loss_elope(vel_pred, vel_target, pos_target)
-            
-            # elope_score = torch.sum(err_vel_norm/torch.abs(pos_target[:, 2]))/np
             
             # Store the remaining velocity-related metrics
             metrics["velocity_error"] = vel_error.item() 
@@ -330,7 +347,7 @@ class LunarTrainer:
         
         return metrics
     
-    def train(self, num_epochs: int, save_path: str='best_model.pth', max_patience: int=10):
+    def train(self, num_epochs: int, max_patience: int=10, **kwargs):
         """
         Main training loop.
         
@@ -343,16 +360,19 @@ class LunarTrainer:
         LOGGER.info(f"Starting training for {num_epochs} epochs.")
         
         # Check if the folder in which to store the weights exists, else create it 
-        save_path = Path(save_path)
-        if not save_path.parent.exists(): 
-            save_path.parent.mkdir(parents=True)
-
+        cfg_weights = self.cfg["weights"]
+                
         # Get current timestamp
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        # Create the figure filename with timestamp
-        save_name = save_path.stem + f"_{timestamp}.pth"
-        save_path_model = str(save_path.parent / save_name)
+        # Retrieve the folder in which to store the results
+        save_path = Path(kwargs.get("save_path", cfg_weights["path"]))
+        save_name = kwargs.get("save_name", cfg_weights["name"]) + f"_{timestamp}"
+        save_path_model = save_path / save_name
+        save_path_model.mkdir(parents=True, exist_ok=False)
+        
+        # Retrieve the number of epochs between each saved checkpoint
+        ckp_epochs = int(cfg_weights["checkpoint_epochs"])
         
         for epoch in range(num_epochs):
             
@@ -365,16 +385,34 @@ class LunarTrainer:
             if val_metrics:
                 self.val_losses.append(val_metrics['total_loss'])
                 val_loss = val_metrics['total_loss']
+                loss_metrics = val_metrics
+            
             else:
                 val_loss = train_metrics['total_loss']
+                loss_metrics = train_metrics
+            
+            # Display the validation losses (e.g., each entry in the dictionary)
+            # loss_names = tuple(loss_metrics.keys())
+            # loss_values = tuple([loss_metrics[ln] for ln in loss_names])
+            
+            # print((" " * 6 + '%15s' * len(loss_names)) % loss_names)
+            # print((" " * 6 + '%15.5f' * len(loss_names)) % loss_values)
             
             # Learning rate scheduling
             self.scheduler.step(val_loss)
             
+            # Check whether we are at a checkpoint for saving the weights
+            if (epoch % ckp_epochs) == 0:
+                torch.save(self.model.state_dict(), save_path_model / f"{epoch}.pt")
+                print(
+                    " "*6, f"Model weights saved! Val. Loss: {val_loss:.4f} / ", 
+                    f"Train Loss: {train_metrics['total_loss']:.4f}"
+                )
+                
             # Save best model
             if val_loss < self.best_val_loss:
                 self.best_val_loss = val_loss
-                torch.save(self.model.state_dict(), save_path_model)
+                torch.save(self.model.state_dict(), save_path_model / "best.pt")
                 print(
                     " "*6, f"New best model saved! Val. Loss: {val_loss:.4f} /", 
                     f"Train Loss: {train_metrics['total_loss']:.4f}\n"
@@ -383,10 +421,10 @@ class LunarTrainer:
                 patience_counter = 0
                 
             else:
-                patience_counter+=1
+                patience_counter += 1
 
             if patience_counter >= max_patience:
-                LOGGER.warning(" --> Early stopping triggered. No improvement for 10 epochs.")
+                LOGGER.warning("Early stopping triggered. No improvement for 10 epochs.")
                 break
 
     def plot_training(self, save_figure=False, figure_name_prefix="training_plot"):

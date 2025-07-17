@@ -8,7 +8,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from pathlib import Path
 from typing import Tuple, Dict, Optional
+
+from elope.utils import load_yaml
 
 warnings.filterwarnings('ignore')
 
@@ -265,9 +268,14 @@ class MultiModalVelocityEstimator(nn.Module):
         )
         
     @staticmethod
-    def create_model(use_attention: bool=False, device: str="cpu"): 
+    def create_model(cfg: str | Path | dict, device: str="cpu"): 
         """Factory function to create the model."""
-        model = MultiModalVelocityEstimator(use_attention=use_attention)
+                
+        # Retrieve the model configuration
+        if isinstance(cfg, (str, Path)): 
+            cfg = load_yaml(cfg)
+            
+        model = MultiModalVelocityEstimator(use_attention=bool(cfg["use_attention"]))
         return model.to(device)
     
     def forward(self, event_tensor, imu_tensor, range_tensor):

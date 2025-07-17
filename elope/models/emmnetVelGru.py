@@ -6,6 +6,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from pathlib import Path
+
+from elope.utils import load_yaml
+
 class PhysicsAwareIMUEncoder(nn.Module):
     """
     IMU encoder that leverages the known relationship between Euler angles 
@@ -674,16 +678,19 @@ class MultiModalVelocityEstimator(nn.Module):
         self._init_weights()
     
     @staticmethod 
-    def create_model(
-        use_attention: bool=True, device: str="cpu", dropout: float=0.15, 
-        use_physics_aware: bool=True
-    ):
+    def create_model(cfg: str | Path | dict, device: str="cpu"):
         """Factory function to create the improved model"""
+        
+        # Retrieve the model configuration
+        if isinstance(cfg, (str, Path)): 
+            cfg = load_yaml(cfg)
+        
         model = MultiModalVelocityEstimator(
-            use_attention=use_attention, 
-            dropout=dropout,
-            use_physics_aware=use_physics_aware
+            use_attention=bool(cfg["use_attention"]), 
+            dropout=float(cfg["dropout"]),
+            use_physics_aware=bool(cfg["physics_aware"])
         )
+        
         return model.to(device)
     
     def _init_weights(self):
