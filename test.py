@@ -670,7 +670,7 @@ def animate_event_data_with_combined(events_data_sequence):
 if __name__ == "__main__":
     
     # Path to the folder from which to retrieve the weights 
-    WEIGHTS_PATH = Path("weights") / "elope-emmnet-v1_20250717_164721" / "best.pt"
+    WEIGHTS_PATH = Path("weights") / "elope-emmnet-v1_20250717_161156" / "24.pth"
 
     # Path to the yaml file containing the dataset settings
     DATASET_CONFIG = "cfg/dataset/rng-5s.yml"
@@ -682,7 +682,7 @@ if __name__ == "__main__":
     DATAPATH = Path("elope_data") / "train"
         
     # A test sequence not used in training (e.g., the first test trajectory)
-    TEST_SEQUENCE_ID = '0010' 
+    TEST_SEQUENCE_ID = '0026' 
     
     # Set to True if we want to extract event features
     EXTRACT_INTERMEDIATE_FEATURES = False 

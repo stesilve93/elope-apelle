@@ -45,7 +45,7 @@ model = MultiModalVelocityEstimator.create_model(MODEL_CFG, device=device)
 trainer = LunarTrainer(MODEL_CFG, model, train_loader, val_loader, device)
 
 # Train the model 
-trainer.train(num_epochs=5, max_patience=10)
+trainer.train(num_epochs=25, max_patience=10)
 
 trainer.plot_training(save_figure=True, figure_name_prefix="./plots/training/training")
 LOGGER.info("Training completed!")
