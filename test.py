@@ -669,23 +669,17 @@ def animate_event_data_with_combined(events_data_sequence):
 # --- Main execution block for testing ---
 if __name__ == "__main__":
     
-    # Use physics aware IMU encoder
-    USE_PHYSICS_AWARE = False 
-    
     # Path to the folder from which to retrieve the weights 
-    WEIGHTS_PATH = Path("weights") 
-    
-    # Name of the file in which the weights are stored
-    WEIGHTS_NAME = "elope-emmnet-v1_20250715_225530.pth"
-    
+    WEIGHTS_PATH = Path("weights") / "elope-emmnet-v1_20250717_164721" / "best.pt"
+
     # Path to the yaml file containing the dataset settings
-    DATASET_CONFIG = "cfg/v1-rnd-cfg.yml"
+    DATASET_CONFIG = "cfg/dataset/rng-5s.yml"
+    
+    # Path to the yaml file containing the model settings
+    MODEL_CONFIG = "cfg/training/emmnet-v1.yml"
     
     # Path in which the sequence data is stored
     DATAPATH = Path("elope_data") / "train"
-    
-    # True if the network should only provide the velocity as output
-    VELOCITY_ONLY = True
         
     # A test sequence not used in training (e.g., the first test trajectory)
     TEST_SEQUENCE_ID = '0010' 
@@ -699,23 +693,24 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
     LOGGER.info(f"Using device: {device}")
     
+    # Load the model and dataset configs
+    cfg_model = load_yaml(MODEL_CONFIG)
+    cfg_dataset = load_yaml(DATASET_CONFIG)
+    
     # Create the sequence loader 
     seq_loader = SequenceLoader(datapath=DATAPATH)
     
     # Create the model 
-    model = MultiModalVelocityEstimator.create_model(
-        use_attention=True, device=device, use_physics_aware=USE_PHYSICS_AWARE
-    )
+    model = MultiModalVelocityEstimator.create_model(MODEL_CONFIG, device)
     
     # Load the model weights
-    weights_fullpath = WEIGHTS_PATH / WEIGHTS_NAME
-    if weights_fullpath.exists(): 
-        LOGGER.info(f"Loading weights from: {weights_fullpath}")
-        data = torch.load(str(weights_fullpath), map_location=device) 
+    if WEIGHTS_PATH.exists(): 
+        LOGGER.info(f"Loading weights from: {WEIGHTS_PATH}")
+        data = torch.load(str(WEIGHTS_PATH), map_location=device) 
         model.load_state_dict(data, strict=False)
         
     else: 
-        raise ValueError(f"Weights file {weights_fullpath} does not exist.")
+        raise ValueError(f"Weights file {WEIGHTS_PATH} does not exist.")
 
     
     # Retrieve the settings from the YAML config 
@@ -795,12 +790,12 @@ if __name__ == "__main__":
         test_metrics = LunarTrainer.compute_metrics(
             torch.tensor(predictions), 
             torch.tensor(targets), 
-            velocity_only=VELOCITY_ONLY
+            velocity_only=cfg_model["velocity_only"]
         )
         
         print(test_metrics)
                     
-        if VELOCITY_ONLY:
+        if cfg_model["velocity_only"]:
             
             print(f"Test Metrics - Vel Error: {test_metrics['velocity_error']:.2f}m/s", f"elope_score: {test_metrics['elope_score']:.4f}")
             
@@ -816,7 +811,7 @@ if __name__ == "__main__":
         print(f"Shape of predictions: {predictions.shape}")
         print(f"Shape of targets: {targets.shape}")
 
-        if VELOCITY_ONLY:
+        if cfg_model["velocity_only"]:
             
             # Calculate individual MSE for each component
             mse_labels = ['Vx (m/s)', 'Vy (m/s)', 'Vz (m/s)']
