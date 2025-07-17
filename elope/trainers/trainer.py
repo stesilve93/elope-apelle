@@ -403,7 +403,7 @@ class LunarTrainer:
             
             # Check whether we are at a checkpoint for saving the weights
             if (epoch % ckp_epochs) == 0:
-                torch.save(self.model.state_dict(), save_path_model / f"{epoch}.pt")
+                torch.save(self.model.state_dict(), save_path_model / f"{epoch}.pth")
                 print(
                     " "*6, f"Model weights saved! Val. Loss: {val_loss:.4f} / ", 
                     f"Train Loss: {train_metrics['total_loss']:.4f}"
@@ -412,7 +412,7 @@ class LunarTrainer:
             # Save best model
             if val_loss < self.best_val_loss:
                 self.best_val_loss = val_loss
-                torch.save(self.model.state_dict(), save_path_model / "best.pt")
+                torch.save(self.model.state_dict(), save_path_model / "best.pth")
                 print(
                     " "*6, f"New best model saved! Val. Loss: {val_loss:.4f} /", 
                     f"Train Loss: {train_metrics['total_loss']:.4f}\n"
