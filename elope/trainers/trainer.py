@@ -53,8 +53,12 @@ class LunarTrainer:
         # True if the position values should be used to evaluate an integral loss.
         self.integral_loss = integral_loss
         
-        # Loss and optimizer
-        self.criterion = nn.MSELoss()
+        # Retrieve the loss weights
+        cfg_losses = self.cfg["losses"]
+        self.lmb_mse_abs = cfg_losses["lmb_mse_abs"] 
+        self.lmb_mse_rel = cfg_losses["lmb_mse_rel"] 
+        self.lmb_elope   = cfg_losses["lmb_elope"] 
+        
         self.optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
         self.scheduler = ReduceLROnPlateau(
             self.optimizer, mode='min', factor=0.5, patience=5
@@ -74,85 +78,22 @@ class LunarTrainer:
         # Retrieve the predicted velocities
         vel_pred = predictions[:, 0:3] if self.velocity_only else predictions[:, 3:6]
         
+        # Compute the different losses
+        l_mse_abs = self.lmb_mse_abs*loss_mse_abs(vel_pred, vel_target)
+        l_mse_rel = self.lmb_mse_rel*loss_mse_rel(vel_pred, vel_target)
+        l_elope   = self.lmb_elope*loss_elope(vel_pred, vel_target, pos_target)
+        
+        # Compute the global loss function
+        total_loss  = l_elope + l_mse_abs + l_mse_rel
+        
         loss = {
-            'position_loss': torch.tensor(0.0, device=self.device), 
-            'velocity_loss': torch.tensor(0.0, device=self.device), 
-            'total_loss': loss_elope(vel_pred, vel_target, pos_target)
+            'vel_mse_abs_loss': l_mse_abs, 
+            'vel_mse_rel_loss': l_mse_rel,
+            'elope_loss': l_elope,
+            'total_loss': total_loss
         }
         
         return loss
-        
-        # Retrieve the position and velocity ground-thruths 
-        # pos_target = targets[:, 0:3]
-        
-        # loss = {} 
-        
-        # total_loss = torch.tensor(0.0, device=self.device)
-        
-        # # TODO: update losses computation using weights 
-        
-        # # MSE Position loss 
-        # # MSE Velocity loss 
-        # # Integral loss 
-        # # Relative MSE Position loss 
-        # # Relative MSE Velocity loss 
-        # # Relative MSE Integral loss 
-        # # ELOPE score 
-        
-        # if not self.velocity_only: 
-            
-        #     # Weight for the velocity loss: velocity is weighted more heavily than pos
-        #     weight_vel = 0.1
-            
-        #     # Retrieve the preidctions
-        #     pos_pred = predictions[:, 0:3]
-        #     vel_pred = predictions[:, 3:6]
-            
-        #     # Compute and store the position loss
-        #     pos_loss = self.criterion(pos_pred, pos_target)
-        #     loss['position_loss'] = pos_loss 
-            
-        #     # Update the total loss with the position component 
-        #     total_loss += pos_loss
-        
-        # else: 
-            
-        #     # Weight for the velocity loss 
-        #     weight_vel = 1.0
-        
-        #     # Retrieve the velocity predictions
-        #     vel_pred = predictions[:, 0:3]
-            
-        #     # Compute and store the position loss
-        #     loss['position_loss'] = torch.tensor(0.0, device=self.device)
-        
-        # # Compute the velocity loss and update the total loss
-        # vel_loss = self.criterion(vel_pred, vel_target)    
-        # total_loss += weight_vel*vel_loss
-        
-        # # vel_loss_est = torch.sum(torch.norm(vel_pred-vel_target, dim=1)**2)/3/vel_pred.shape[0]
-        # # print(vel_loss, vel_loss_est)
-        # # raise RuntimeError
-            
-        # if self.integral_loss: 
-            
-        #     # TODO: this requires that I know the timings at which the predictions were made
-        #     integral_loss = torch.tensor(0.0, device=self.device)
-        #     # integral_loss = torch.trapezoid()
-            
-        #     # Compute an additional loss due to the integral of the position 
-        #     loss['integral_loss'] = integral_loss   
-        #     total_loss += integral_loss
-            
-        # else: 
-        #     loss['integral_loss'] = torch.tensor(0.0, device=self.device)
-            
-
-        # # Store the velocity and total loss 
-        # loss['velocity_loss'] = vel_loss
-        # loss['total_loss'] = total_loss 
-        
-        # return loss
         
     @staticmethod
     def compute_metrics(
@@ -205,8 +146,10 @@ class LunarTrainer:
         self.model.train()
         
         running_loss = 0.0
-        running_pos_loss = 0.0
-        running_vel_loss = 0.0
+        running_elope_loss = 0.0 
+        running_mse_abs_loss = 0.0 
+        running_mse_rel_loss = 0.0 
+        
         num_batches = 0
         
         # Create the bar to display current iterations
@@ -233,8 +176,6 @@ class LunarTrainer:
                 events = events.squeeze(0)
                 imu = imu.squeeze(0)
             
-            # print(imu.shape, rangemeter.shape, events.shape, times.shape, targets.shape)
-            # raise RuntimeError
             self.optimizer.zero_grad()
             
             # Forward pass
@@ -254,8 +195,11 @@ class LunarTrainer:
             
             # Track losses
             running_loss += loss.item()
-            running_pos_loss += loss_dict['position_loss'].item()
-            running_vel_loss += loss_dict['velocity_loss'].item()
+            
+            running_elope_loss += loss_dict['elope_loss'].item()
+            running_mse_abs_loss += loss_dict['vel_mse_abs_loss'].item()
+            running_mse_rel_loss += loss_dict['vel_mse_rel_loss'].item()
+            
             num_batches += 1
             
             if i % tbar.miniters == 0:
@@ -263,8 +207,9 @@ class LunarTrainer:
             
         return {
             'total_loss': running_loss / num_batches,
-            'position_loss': running_pos_loss / num_batches,
-            'velocity_loss': running_vel_loss / num_batches
+            'elope_loss': running_elope_loss / num_batches,
+            'vel_mse_abs_loss': running_mse_abs_loss / num_batches,
+            'vel_mse_rel_loss': running_mse_rel_loss / num_batches
         }
     
     def validate(self) -> dict:
@@ -274,7 +219,11 @@ class LunarTrainer:
             return {}
             
         self.model.eval()
+        
         running_loss = 0.0
+        running_elope_loss = 0.0 
+        running_mse_abs_loss = 0.0 
+        running_mse_rel_loss = 0.0
         
         all_predictions = []
         all_targets = []
@@ -305,8 +254,13 @@ class LunarTrainer:
                 
                 # Compute the loss 
                 loss_dict = self.weighted_pose_loss(predictions, targets)
+                
                 running_loss += loss_dict['total_loss'].item()
                 
+                running_elope_loss   += loss_dict['elope_loss'].item()
+                running_mse_abs_loss += loss_dict['vel_mse_abs_loss'].item()
+                running_mse_rel_loss += loss_dict['vel_mse_rel_loss'].item()
+            
                 all_predictions.append(predictions.cpu())
                 all_targets.append(targets.cpu())
                 
@@ -318,9 +272,10 @@ class LunarTrainer:
         metrics = self.compute_metrics(all_predictions, all_targets, self.velocity_only)
         
         # Compute the validation loss
-        val_loss = running_loss / len(self.val_loader)
-        metrics['total_loss'] = val_loss
-        
+        metrics['total_loss'] = running_loss / len(self.val_loader)
+        metrics['elope_loss'] = running_elope_loss / len(self.val_loader)
+        metrics['vel_mse_abs_loss'] = running_mse_abs_loss / len(self.val_loader)
+        metrics['vel_mse_rel_loss'] = running_mse_rel_loss / len(self.val_loader)
         return metrics
     
     def train(self, num_epochs: int, max_patience: int=10, **kwargs):
@@ -396,8 +351,8 @@ class LunarTrainer:
             loss_names = tuple(loss_metrics.keys())
             loss_values = tuple([loss_metrics[ln] for ln in loss_names])
             
-            print((" " * 6 + '%15s' * len(loss_names)) % loss_names)
-            print((" " * 6 + '%15.5f' * len(loss_names)) % loss_values)
+            print((" " * 6 + '%20s' * len(loss_names)) % loss_names)
+            print((" " * 6 + '%20.5f' * len(loss_names)) % loss_values)
             print("\n")
 
             if patience_counter >= max_patience:

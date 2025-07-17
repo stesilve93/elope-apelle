@@ -21,3 +21,15 @@ use_attention: True
 
 # Dropout fraction for the model
 dropout: 0.15
+
+# Training losses settings
+losses:
+
+  # Weight for the loss using absolute MSE
+  lmb_mse_abs: 0.0 
+
+  # Weight for the loss using relative MSE
+  lmb_mse_rel: 0.0 
+
+  # Weight for the ELOPE loss
+  lmb_elope: 1.0

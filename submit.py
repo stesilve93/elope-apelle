@@ -17,6 +17,7 @@ from elope.utils import LOGGER, load_yaml, getfiles
 # Name of the file in which the weights are stored
 WEIGHTS_PATH = Path("weights") / "elope-emmnet-v1_20250717_164721" / "best.pt"
 
+# Path to the file containing the trained dataset
 CFG_PATH_DATASET = "cfg/dataset/rng-5s.yml"
 
 # Path to the yaml file containing the dataset settings
