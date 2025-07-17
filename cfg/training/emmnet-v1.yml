@@ -1,0 +1,23 @@
+
+weights: 
+
+  # Path to the folder in which to store the sample weights
+  path: weights
+
+  # Name of the model
+  name: elope-emmnet-v1
+
+  # Specify every how many epochs the model weights should be saved.
+  checkpoint_epochs: 2
+
+# True if the network should only provide the velocity as an input
+velocity_only: True
+
+# True if a physics-aware IMU encoder should be used
+physics_aware: False
+
+# True if attention should be used to determine the fusion strategy
+use_attention: True
+
+# Dropout fraction for the model
+dropout: 0.15
