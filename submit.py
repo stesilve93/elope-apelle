@@ -120,9 +120,9 @@ for seq in sequences:
             
         vels = pred_k.cpu().numpy().squeeze()
         
-        vx.append(vels[0])
-        vy.append(vels[1])
-        vz.append(vels[2])
+        vx.append(float(vels[0]))
+        vy.append(float(vels[1]))
+        vz.append(float(vels[2]))
 
     vx = [vx[0]] * t_idx + vx 
     vy = [vy[0]] * t_idx + vy 
@@ -132,5 +132,5 @@ for seq in sequences:
     LOGGER.info(f"Tested sequence: {seq}")
 
 # writing submission-file to drive
-with open('bogus_submission.json', 'wt') as f:
+with open('apelle_submission.json', 'wt') as f:
     json.dump(bogus, f)
