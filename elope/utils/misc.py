@@ -85,3 +85,24 @@ def increment_path(path: str | Path, exist_ok: bool=True, sep: str = '-') -> Pat
     i = [int(m.groups()[0]) for m in matches if m] 
     n = max(i) + 1 if i else 2  
     return Path(f"{path}{sep}{n}")
+
+
+def getfiles(path: str | Path, ext: str=None) -> list: 
+    """Return a list of all the files in a directory.
+    
+    Parameters
+    ----------
+    path : str or Path
+        Search directory.
+    ext : str or tuple, optional 
+        Desired file extension(s), including the dot (e.g., .png). Defaults to None.
+    """
+    path = Path(path) 
+    if ext is None: 
+        return [f for f in path.iterdir() if f.is_file()]
+    else: 
+        
+        if isinstance(ext, str): 
+            ext = (ext,)
+    
+        return [f for f in path.iterdir() if f.suffix in ext]

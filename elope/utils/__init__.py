@@ -2,7 +2,8 @@
 from .misc import (
     load_yaml, 
     save_yaml, 
-    increment_path
+    increment_path, 
+    getfiles,
 )
 
 from .logger import LOGGER
