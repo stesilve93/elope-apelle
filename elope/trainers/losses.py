@@ -2,7 +2,7 @@
 import torch 
 
 
-def mse_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+def loss_mse_abs(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     """Compute the Mean-Square Error Loss.
     
     Parameters
@@ -17,19 +17,16 @@ def mse_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     loss : torch.Tensor
     
     """
-    
-    squared_error = (pred - target)**2
-    torch.sum()
 
+    err_vel_abs = (pred - target)**2
+    return torch.sum(err_vel_abs)/target.numel()
+    
     
 def loss_mse_rel(pred: torch.Tensor, target: torch.Tensor) -> torch.tensor: 
     # DOCME
-    # TODO 
     
-    mse = torch.sum((pred - target)**2, dim=1)
-    mag = torch.sum(target**2, dim=1)
-    
-    return torch.sum(mse/mag)/target.shape[0]
+    err_vel_rel = ((pred - target)/target)**2
+    return torch.sum(err_vel_rel)/target.numel()
 
     
 def loss_elope(
