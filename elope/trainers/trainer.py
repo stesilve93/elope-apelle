@@ -22,15 +22,13 @@ from .losses import loss_elope, loss_mse_abs, loss_mse_rel
 class LunarTrainer: 
     
     def __init__(
-        self, model_cfg: str | Path | dict, model: nn.Module, train_loader: ElopeDataLoader, 
-        val_loader: ElopeDataLoader=None, device: str ='cuda', integral_loss: bool=False
+        self, 
+        model_cfg: str | Path | dict, 
+        model: nn.Module, 
+        train_loader: ElopeDataLoader, 
+        val_loader: ElopeDataLoader=None, 
+        device: str ='cuda'
     ):
-        
-        # Ensure both datasets are set to the same sequential settings. This check is needed 
-        # because if the validation set is not the same, the computation of integral 
-        # cost functions may yield incoherent results.
-        
-        assert train_loader.sequential_samples == val_loader.sequential_samples
         
         # Retrieve the model configuration
         if isinstance(model_cfg, (str | Path)): 
@@ -40,18 +38,16 @@ class LunarTrainer:
         self.cfg = model_cfg 
         self.velocity_only = bool(self.cfg["velocity_only"])
 
-        # Store the network model 
+        # Store the network model and hardware device 
         self.model = model
+        self.device = device
 
-        # Store the dataset loaders
+        # Store the validation and training dataset loaders
         self.train_loader = train_loader
         self.val_loader = val_loader
-        self.device = device
         
-        self.sequential_samples = self.train_loader.sequential_samples
-        
-        # True if the position values should be used to evaluate an integral loss.
-        self.integral_loss = integral_loss
+        # Check whether the model is sequence to sequence.
+        self.seq2seq = bool(self.cfg["seq2seq"])
         
         # Retrieve the loss weights
         cfg_losses = self.cfg["losses"]
@@ -72,6 +68,10 @@ class LunarTrainer:
     def weighted_pose_loss(self, predictions: torch.Tensor, targets: torch.Tensor) -> dict:
         """Compute weighted loss for position and velocity components."""
         
+        if not self.seq2seq: 
+            # If we are only predicting the final state, retrieve only that part.
+            targets = targets[:, -1]
+            
         pos_target = targets[:, 0:3]
         vel_target = targets[:, 3:6]
         
@@ -125,7 +125,6 @@ class LunarTrainer:
                 # Retrieve the velocity predictions
                 vel_pred = predictions[:, 0:3]
             
-            
             # Compute the velocity absolute and relative MSE
             vel_mse_abs = loss_mse_abs(vel_pred, vel_target) 
             vel_mse_rel = loss_mse_rel(vel_pred, vel_target)
@@ -159,22 +158,12 @@ class LunarTrainer:
         )
         
         for i, (events, imu, rangemeter, targets, times) in enumerate(tbar):
-        
+            
             times = times.to(self.device)
             targets = targets.to(self.device)
             rangemeter = rangemeter.to(self.device)
             events = events.to(self.device)
             imu = imu.to(self.device)
-            
-            if self.sequential_samples: 
-                # Remove from all the vectors the first dimension as the 'batch'
-                # dimension is already embedded in the samples sequentiality 
-                times = times.squeeze(0)
-                targets = targets.squeeze(0)
-                
-                rangemeter = rangemeter.squeeze(0)
-                events = events.squeeze(0)
-                imu = imu.squeeze(0)
             
             self.optimizer.zero_grad()
             
@@ -238,16 +227,6 @@ class LunarTrainer:
                 events = events.to(self.device)
                 imu = imu.to(self.device)
                 
-                if self.sequential_samples: 
-                    # Remove from all the vectors the first dimension as the 'batch'
-                    # dimension is already embedded in the samples sequentiality 
-                    times = times.squeeze(0)
-                    targets = targets.squeeze(0)
-                    
-                    rangemeter = rangemeter.squeeze(0)
-                    events = events.squeeze(0)
-                    imu = imu.squeeze(0)
-                
                 # Run inference
                 outputs = self.model(events, imu, rangemeter)
                 predictions = outputs['prediction']
@@ -260,6 +239,10 @@ class LunarTrainer:
                 running_elope_loss   += loss_dict['elope_loss'].item()
                 running_mse_abs_loss += loss_dict['vel_mse_abs_loss'].item()
                 running_mse_rel_loss += loss_dict['vel_mse_rel_loss'].item()
+                
+                # Check whether we only care about the last target state 
+                if not self.seq2seq: 
+                    targets = targets[:, -1]
             
                 all_predictions.append(predictions.cpu())
                 all_targets.append(targets.cpu())

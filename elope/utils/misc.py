@@ -1,8 +1,13 @@
 
-import glob 
-import re 
-
+import glob
+import gzip 
+import json 
+import hashlib
+import pickle 
+import re
 import yaml 
+
+import numpy as np
 
 from pathlib import Path 
 
@@ -106,3 +111,67 @@ def getfiles(path: str | Path, ext: str=None) -> list:
             ext = (ext,)
     
         return [f for f in path.iterdir() if f.suffix in ext]
+
+def serialize(obj):
+    """Make a generic object JSON serializable."""
+    if isinstance(obj, dict):
+        return {k: serialize(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [serialize(v) for v in obj]
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, (np.generic,)):
+        return obj.item()
+    else:
+        return obj
+    
+def dict2hash(d: dict): 
+    """Transform a dictionary into a hashkey."""
+    str = json.dumps(serialize(d), sort_keys=True)
+    return hashlib.sha256(str.encode()).hexdigest()
+
+
+def save_pickle(filepath: str | Path, obj, compress: bool=False): 
+    """Store content into a binary pickle file.
+    
+    Parameters
+    ----------
+    filepath : str or Path 
+        Filepath to the pickle file. 
+    compress : bool, optional 
+        True if the file should be compressed. Defaults to False
+    """
+    
+    # Check whether the file should be compressed or not
+    if compress: 
+        with gzip.open(filepath, 'wb') as f: 
+            pickle.dump(obj, f)
+    else: 
+        with open(filepath, 'wb') as f: 
+            pickle.dump(obj, f)
+        
+        
+def load_pickle(filepath: str | Path, compressed: bool=False): 
+    """Read the content of a binary pickle file.
+    
+    Parameters
+    ----------
+    filepath : str or Path 
+        Filepath to the pickle file. 
+    compressed : bool, optional 
+        True if the file is compressed with gzip. Defaults to False.
+    
+    Returns 
+    -------
+    out
+        Pickle file content.
+    """
+    
+    # If the file is compressed use gzip
+    if compressed: 
+        with gzip.open(filepath, 'rb') as f:
+            return pickle.load(f)
+    
+    # Read the uncompressed file
+    with open(filepath, 'rb') as f: 
+        return pickle.load(f)
