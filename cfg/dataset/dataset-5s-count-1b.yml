@@ -1,7 +1,6 @@
 
 # Path to the folder containing the original training data
-# datapath: elope_data/train
-datapath: testseq/
+datapath: elope_data/train
 
 # Path to the folder in which to store the cached dataset model
 output_path: dataset/
@@ -17,7 +16,7 @@ use_cached: True
 
 # True if the dataset should be expanded by including flipped trajectory samples (i.e., the 
 # lander motion is reversed.)
-flip: False
+flip: True
 
 # Sampling interval along the trajectory. It determines how many state points are 
 # retrieved from that trajectory. 
