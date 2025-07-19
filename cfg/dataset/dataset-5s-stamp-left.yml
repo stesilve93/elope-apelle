@@ -5,7 +5,7 @@ datapath: elope_data/train
 # Path to the folder in which to store the cached dataset model
 output_path: dataset/
 # Name prefix of the dataset
-output_name: dataset-5s-count-1b
+output_name: dataset-5s-stamp-left
 
 # If true, once the dataset has been loaded, it will be saved to the output directory 
 # written above
@@ -17,7 +17,7 @@ use_cached: True
 # Determine the direction in which each sequence should be approached. Supported values are 
 # "left" for the original time-forward direction, "right" for the inverse motion and 
 # "both" to include a copy of both.
-side: "left"
+side: left
 
 # Sampling interval along the trajectory. It determines how many state points are 
 # retrieved from that trajectory. 
@@ -37,11 +37,11 @@ events:
   width: 200
   # Vertical dimension of the image, in pixels.
   height: 200
-  # Time dimension for the event tensor (i.e., number of time bins)
-  channels: 1
+  # Dimension for the event tensor (i.e., number of time bins)
+  channels: 1 
 
   # Type of event encoding, either "count" or "last_timestamp"
-  encoder_method: count 
+  encoder_method: last_timestamp 
 
   # Duration of the window in which events are integrated, in microseconds
   integration_window: 1e5
