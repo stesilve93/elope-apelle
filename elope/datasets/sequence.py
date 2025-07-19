@@ -244,20 +244,23 @@ class SequenceLoader:
         
         if flip: 
             
+            # Copies of the arrays are made because PyTorch does not support 
+            # negative strides
+            
             # Flip the rangemeter data and trajectory times
-            range_seq = range_seq[::-1]
-            imu_tms = imu_tms[::-1]
+            range_seq = range_seq[::-1].copy()
+            imu_tms = imu_tms[::-1].copy()
             
             # Flip the IMU sequence and invert the angular velocities
-            imu_seq = imu_seq[::-1]
+            imu_seq = imu_seq[::-1].copy()
             imu_seq[:, 3:6] = -imu_seq[:, 3:6]
             
             # Flip the trajectory data and invert the velocities
-            targets = targets[::-1]
+            targets = targets[::-1].copy()
             targets[:, 3:6] = -targets[:, 3:6]
             
             # Flip the events (we still have the first that is referred to the last state)
-            events_tensor = events_tensor[::-1]
+            events_tensor = events_tensor[::-1].copy()
         
         return {
             'events_tensor': torch.from_numpy(events_tensor), 
