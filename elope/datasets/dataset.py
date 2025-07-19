@@ -25,7 +25,7 @@ class ElopeDataset(Dataset):
     }
     
     KEYS_DATASET = [
-        "sample_interval", "imu_sequence_length", "imu_padding", "events", "flip"
+        "sample_interval", "imu_sequence_length", "imu_padding", "events", "side"
     ]
     
     def __init__(
@@ -205,7 +205,13 @@ class ElopeDataset(Dataset):
         sample_interval = int(self.cfg_dataset["sample_interval"])
         
         # Get the directions from which to create the dataset
-        sides = ["left", "right"] if self.cfg_dataset["flip"] else ["left"]
+        cfg_side = self.cfg_dataset["side"]
+        if cfg_side in ("left", "right"): 
+            sides = [cfg_side]
+        elif cfg_side == "both": 
+            sides = ["left", "right"]
+        else: 
+            raise ValueError(f"`{cfg_side}` is not a supported side value.")
         
         subsamples = []
         for side in sides: 
@@ -238,8 +244,8 @@ class ElopeDataset(Dataset):
         
         # Retrieve the different sequences 
         events     = sample['events_tensor']
-        imu_seq    = sample['imu_sequence']
-        rangemeter = sample['rangemeter_sequence']
+        imu_seq    = sample['imu_sequence'].clone()
+        rangemeter = sample['rangemeter_sequence'].clone()
         targets    = sample['ground_truth']
         times      = sample['times'] 
         
