@@ -27,7 +27,8 @@ class LunarTrainer:
         model: nn.Module, 
         train_loader: ElopeDataLoader, 
         val_loader: ElopeDataLoader=None, 
-        device: str ='cuda'
+        device: str ='cuda',
+        val_metric: str="elope_score"
     ):
         
         # Retrieve the model configuration
@@ -45,6 +46,9 @@ class LunarTrainer:
         # Store the validation and training dataset loaders
         self.train_loader = train_loader
         self.val_loader = val_loader
+        
+        # Store the name of the metric used to identify the best model 
+        self.val_metric_key = val_metric
         
         # Check whether the model is sequence to sequence.
         self.seq2seq = bool(self.cfg["seq2seq"])
@@ -320,11 +324,11 @@ class LunarTrainer:
             val_metrics = self.validate()
             if val_metrics:
                 self.val_losses.append(val_metrics['total_loss'])
-                val_loss = val_metrics['total_loss']
+                val_loss = val_metrics[self.val_metric_key]
                 loss_metrics = val_metrics
             
             else:
-                val_loss = train_metrics['total_loss']
+                val_loss = train_metrics[self.val_metric_key]
                 loss_metrics = train_metrics
             
             # Learning rate scheduling
@@ -334,8 +338,8 @@ class LunarTrainer:
             if (epoch % ckp_epochs) == 0:
                 torch.save(self.model.state_dict(), save_path_model / f"{epoch}.pth")
                 print(
-                    " "*6, f"Model weights saved! Val. Loss: {val_loss:.4f} / ", 
-                    f"Train Loss: {train_metrics['total_loss']:.4f}"
+                    " "*6, f"Model weights saved! Val. Metric ({self.val_metric_key}): " 
+                    f"{val_loss:.4f} / Train Loss: {train_metrics['total_loss']:.4f}"
                 )
                 
             # Save best model
@@ -343,8 +347,8 @@ class LunarTrainer:
                 self.best_val_loss = val_loss
                 torch.save(self.model.state_dict(), save_path_model / "best.pth")
                 print(
-                    " "*6, f"New best model saved! Val. Loss: {val_loss:.4f} /", 
-                    f"Train Loss: {train_metrics['total_loss']:.4f}"
+                    " "*6, f"New best model saved! Val. Metric ({self.val_metric_key}): "
+                    f"{val_loss:.4f} / Train Loss: {train_metrics['total_loss']:.4f}"
                 )
                 
                 patience_counter = 0
