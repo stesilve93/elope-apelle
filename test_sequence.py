@@ -1,12 +1,16 @@
 
+import matplotlib.pyplot as plt 
+import numpy as np
 import torch 
 
 from pathlib import Path 
 
-from elope.datasets import ElopeDataLoader
+from tabulate import tabulate
+
+from elope.datasets import ElopeDataLoader, SequenceLoader
 from elope.models.emmnetVelGru import MultiModalVelocityEstimator
 from elope.trainers import LunarTrainer
-from elope.utils import LOGGER
+from elope.utils import LOGGER, load_yaml, gridminor, increment_path
 
 # Path to the yaml file containing the dataset settings
 DATASET_CFG = "cfg/dataset/dataset-5s-stamp.yml"
@@ -15,7 +19,10 @@ DATASET_CFG = "cfg/dataset/dataset-5s-stamp.yml"
 MODEL_CFG = "cfg/training/emmnet-v1-mse-rel.yml"
 
 # Path to PyTorch's weight file
-WEIGHTS_PATH = Path("weights") / "" / "best.pt"
+WEIGHTS_PATH = Path("weights") / "elope-emmnet-v1-elope_20250719_123610" / "best.pth"
+
+# True if the plots of the predictions / groundtruth should be saved for each test traj.
+SAVE_PLOTS = True
 
 # Device configuration 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -26,21 +33,27 @@ all_sequences = [str(i).zfill(4) for i in range(28)]
 seq_train = all_sequences[:22]  # 80% for training
 seq_val = all_sequences[22:]    # 20% for validation
 
-# Create the PyTorch's dataloaders
-test_loader = ElopeDataLoader(
-    DATASET_CFG,
-    seq_val, 
-    augment=True, 
-    batch_size=32,
-    shuffle=True, 
-    num_workers=8, 
-    rangemeter_noise=0.01, 
-    angles_noise=0.005, 
-    angles_vel_noise=0.005
+# Load the dataset config and create a Sequence Loader
+dataset_cfg = load_yaml(DATASET_CFG)
+events_cfg = dataset_cfg["events"]
+
+seq_loader = SequenceLoader(
+    dataset_cfg["datapath"], 
+    event_integration_window=events_cfg["integration_window"],
+    event_encoder_method=events_cfg["encoder_method"],
+    event_normalization=events_cfg["normalization"],
+    event_H=events_cfg["height"],
+    event_W=events_cfg["width"],
+    event_T=events_cfg["channels"], 
+    imu_seq_len=dataset_cfg["imu_sequence_length"], 
+    imu_padding=dataset_cfg["imu_padding"]
 )
 
+# Load the model config 
+model_cfg = load_yaml(MODEL_CFG)
+
 # Create the network model 
-model = MultiModalVelocityEstimator.create_model(MODEL_CFG, device=device)
+model = MultiModalVelocityEstimator.create_model(model_cfg, device=device)
 
 # Load the model weights 
 if WEIGHTS_PATH.exists(): 
@@ -55,24 +68,28 @@ else:
 model.eval()
 model.to(device)
 
-# Retrieve the sequence loader from the dataset config 
-seq_loader = test_loader.dataset.seq_loader
-
 # Retrieve the starting index 
 idx_beg = seq_loader.imu_seq_len - 1
+
+tab_headers = ["sequence", "vel_mse_abs", "vel_mse_rel", "elope_score"]
+tab_values  = []
+
+if SAVE_PLOTS: 
+    
+    # Generate the path in which to store the plots
+    PLOTS_PATH = increment_path(Path("plots") / WEIGHTS_PATH.parent.name, exist_ok=False)
+    PLOTS_PATH.mkdir()
 
 for seq_id in seq_train: 
     
     # Load the sequence
     LOGGER.info(f"Loading test sequence: {seq_id}")
     seq_loader.load_sequence(seq_id)
-    
-    # Retrieve the sequence length 
-    len_seq = len(seq_loader)
+    seq_loader.preprocess_events(side="left")
     
     # Initialize the arrays for the results
     predictions, targets, times = [], [], []
-    for k in range(idx_beg, len_seq): 
+    for k in range(idx_beg, seq_loader.seq_len): 
         
         # Retrieve the data at the current time
         data_k = seq_loader.get_data_at_time(seq_loader.timestamps_full[k])
@@ -81,7 +98,11 @@ for seq_id in seq_train:
         events    = data_k['events_tensor'].unsqueeze(0).to(device)
         imu_seq   = data_k['imu_sequence'].unsqueeze(0).to(device)
         range_seq = data_k['rangemeter_sequence'].unsqueeze(0).to(device)
-        targets   = data_k['ground_truth'].unsqueeze(0).to(device)
+        states   = data_k['ground_truth'].unsqueeze(0).to(device)
+        
+        if not model_cfg["seq2seq"]: 
+            events = events[:, -1]
+            states = states[:, -1]
         
         with torch.no_grad(): 
             # Run inference and retrieve the predictions 
@@ -90,15 +111,46 @@ for seq_id in seq_train:
             
         # Store the results 
         times.append(seq_loader.timestamps_full[k])
-        targets.append(targets.cpu().numpy().squeeze())
+        targets.append(states.cpu().numpy().squeeze())
         predictions.append(pred_k.cpu().numpy().squeeze())
-        
+    
+    predictions = np.array(predictions)
+    targets = np.array(targets)
+    times = np.array(times)
+    
     # Compute the test metrics
     test_metrics = LunarTrainer.compute_metrics(
         torch.tensor(predictions), 
         torch.tensor(targets), 
-        velocity_only=predictions[0].shape[1] == 3
+        velocity_only=model_cfg["velocity_only"]
     )
+    
+    # Store the statistics of this trajectory
+    seq_metrics = [seq_id]
+    for header in tab_headers[1:]: 
+        seq_metrics.append(float(test_metrics[header]))
+        
+    tab_values.append(seq_metrics)
+    
+    if SAVE_PLOTS: 
+        # Get the offest index
+        ioff = 0 if model_cfg["velocity_only"] else 3
+        
+        # Create the plots with the predicted velocities 
+        fig, axes = plt.subplots(nrows=3, figsize=(15,15), sharex=True)
+        for i in range(3): 
+            
+            axes[i].plot(times, targets[:, i+3], label='Target')
+            axes[i].plot(times, predictions[:, i+ioff], label='Prediction')
+            axes[i].set_xlabel('Time (s)')
+            axes[i].set_xlim(times[0], times[-1])
+            gridminor(axes[i])
+            
+            axes[i].legend() 
+            
+        fig.tight_layout() 
+        fig.savefig(PLOTS_PATH / f"{seq_id}.png", dpi=300)
+        plt.close(fig)
     
     # Display the validation losses (e.g., each entry in the dictonary)
     loss_names = tuple(test_metrics.keys())
@@ -108,3 +160,7 @@ for seq_id in seq_train:
     print((" " * 14 + '%15.5f' * len(loss_names)) % loss_values)
     print("\n")
                 
+                
+LOGGER.info("Test statistics summary:")
+table = tabulate(tab_values, headers=tab_headers, tablefmt="fancy_outline")
+print("\n".join(" "*7 + line for line in table.splitlines()))
