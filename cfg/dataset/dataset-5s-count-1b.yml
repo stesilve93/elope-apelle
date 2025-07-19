@@ -1,11 +1,12 @@
 
 # Path to the folder containing the original training data
-datapath: elope_data/train
+# datapath: elope_data/train
+datapath: testseq/
 
 # Path to the folder in which to store the cached dataset model
 output_path: dataset/
 # Name prefix of the dataset
-output_name: dataset-5s
+output_name: dataset-5s-count-1b
 
 # If true, once the dataset has been loaded, it will be saved to the output directory 
 # written above
@@ -13,6 +14,10 @@ save_cache: True
 
 # If true, the program will first look for a dataset file in the output directory
 use_cached: True
+
+# True if the dataset should be expanded by including flipped trajectory samples (i.e., the 
+# lander motion is reversed.)
+flip: False
 
 # Sampling interval along the trajectory. It determines how many state points are 
 # retrieved from that trajectory. 
@@ -33,10 +38,14 @@ events:
   # Vertical dimension of the image, in pixels.
   height: 200
   # Time dimension for the event tensor (i.e., number of time bins)
-  time_bins: 200 
+  channels: 1
 
   # Type of event encoding, either "count" or "last_timestamp"
-  encoder_method: last_timestamp 
+  encoder_method: count 
 
   # Duration of the window in which events are integrated, in microseconds
   integration_window: 1e5
+
+  # Type of normalisation for the event tensor.
+  # Supported values are "minmax", "standard" or "null"
+  normalization: "null"
