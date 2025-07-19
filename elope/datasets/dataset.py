@@ -54,9 +54,10 @@ class ElopeDataset(Dataset):
             event_integration_window=cfg_events["integration_window"],
             event_encoder_method=cfg_events["encoder_method"],
             event_normalization=cfg_events["normalization"],
+            event_clamp=cfg_events.get("clamp", -1),
             event_H=cfg_events["height"],
             event_W=cfg_events["width"],
-            event_T=cfg_events["channels"], 
+            event_T=cfg_events.get("channels", 1), 
             imu_seq_len=self.cfg_dataset["imu_sequence_length"], 
             imu_padding=self.cfg_dataset["imu_padding"]
         )

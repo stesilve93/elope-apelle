@@ -170,6 +170,7 @@ class EventProcessor:
         method: str="count", 
         time_window: float=1e5, 
         side: str="left",
+        clamp: int=10,
     ) -> np.ndarray: 
         # DOCME: Time must be expressed in microseconds!!
         
@@ -177,7 +178,7 @@ class EventProcessor:
         assert time_window > 0
     
         if method == "count": 
-            return _events_to_tensor_count(events, time, H, W, T, time_window, side)
+            return _events_to_tensor_count(events, time, H, W, T, time_window, side, clamp)
         
         elif method == "last_timestamp": 
             return _events_to_tensor_timestamp(events, time, H, W, time_window, side)
@@ -186,7 +187,9 @@ class EventProcessor:
             raise ValueError(f"`{method}` is not a valid event encoding method.")
 
     @staticmethod
-    def normalize_tensor(tensor: np.ndarray, method: str='standard') -> np.ndarray:
+    def normalize_tensor(
+        tensor: np.ndarray, method: str='standard', min_val: float=None, max_val: float=None
+    ) -> np.ndarray:
         """Normalize event tensor"""
         
         if method == 'standard':
@@ -198,7 +201,9 @@ class EventProcessor:
                 
         elif method == 'minmax':
             # Min-max normalization
-            min_val, max_val = tensor.min(), tensor.max()
+            min_val = min_val if min_val is not None else tensor.min() 
+            max_val = max_val if max_val is not None else tensor.max() 
+
             if max_val > min_val:
                 tensor = (tensor - min_val) / (max_val - min_val)
                 
@@ -207,9 +212,10 @@ class EventProcessor:
         
         return tensor.astype(np.float32)
 
-@njit(cache=True)
+
 def _events_to_tensor_count(
-    events: np.ndarray, time: float, H: int, W: int, T: int, time_window: float, side: str
+    events: np.ndarray, time: float, H: int, W: int, T: int, time_window: float, side: str, 
+    clamp: int
 ) -> np.ndarray: 
     
     # events is an array of size (n, 4) with (x, y, p, t)
@@ -290,7 +296,11 @@ def _events_to_tensor_count(
         # Invert the polarity of the events if we are looking backwards 
         tensor = tensor[:, :, :, ::-1]
     
-    return tensor    
+    if clamp > 0:
+        # Clamp the maximum values within each bin.
+        tensor = np.clip(tensor, 0, clamp)
+         
+    return tensor     
     
 @njit(cache=True)
 def _events_to_tensor_timestamp(
