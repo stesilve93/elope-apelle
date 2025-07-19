@@ -165,6 +165,10 @@ class LunarTrainer:
             events = events.to(self.device)
             imu = imu.to(self.device)
             
+            if not self.seq2seq: 
+                # Keep only the events closest to the state to be predicted
+                events = events[:, -1]
+            
             self.optimizer.zero_grad()
             
             # Forward pass
@@ -226,6 +230,10 @@ class LunarTrainer:
                 rangemeter = rangemeter.to(self.device)
                 events = events.to(self.device)
                 imu = imu.to(self.device)
+                
+                if not self.seq2seq: 
+                    # Keep only the events closest to the state to be predicted
+                    events = events[:, -1]
                 
                 # Run inference
                 outputs = self.model(events, imu, rangemeter)
