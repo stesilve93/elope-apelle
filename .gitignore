@@ -6,3 +6,5 @@
 *.pth
 *.png
 .vscode*
+
+old/*
