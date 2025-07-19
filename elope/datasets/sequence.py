@@ -159,11 +159,11 @@ class SequenceLoader:
         
         # Retrieve the sampling times at the desired IMU times
         imu_start_idx = max(0, traj_idx - self.imu_seq_len + 1)
-        imu_tms = self.timestamps_full[imu_start_idx:traj_idx+1]
+        imu_tms = self.timestamps_full[imu_start_idx:traj_idx+1].copy()
         
         # Retrieve the angular measures (phi, theta, psi, p, q, r)
-        imu_seq = self.trajectory_full[imu_start_idx:traj_idx+1, 6:12] 
-        targets = self.trajectory_full[imu_start_idx:traj_idx+1, 0:6]
+        imu_seq = self.trajectory_full[imu_start_idx:traj_idx+1, 6:12].copy()
+        targets = self.trajectory_full[imu_start_idx:traj_idx+1, 0:6].copy()
         
         # Pad if the IMU sequence is shorter than imu_seq_len 
         if imu_seq.shape[0] < self.imu_seq_len: 
@@ -200,7 +200,7 @@ class SequenceLoader:
         range_mask = (self.rangemeter_full[:, 0] >= imu_tms[0] - dt) & \
                      (self.rangemeter_full[:, 0] <= imu_tms[-1] + dt)
                      
-        range_data = self.rangemeter_full[range_mask]
+        range_data = self.rangemeter_full[range_mask].copy()
         
         # Interpolate the data at all strictly positive times 
         range_seq = np.interp(imu_tms[imu_tms > 0], range_data[:,0], range_data[:,1])
