@@ -78,13 +78,26 @@ class LunarTrainer:
         # Retrieve the predicted velocities
         vel_pred = predictions[:, 0:3] if self.velocity_only else predictions[:, 3:6]
         
+        # Assemble the global loss function
+        total_loss = torch.tensor(0.0, requires_grad=True).to(targets)
+         
+        # Initialize the loss functions
+        l_mse_abs = torch.tensor(0.0, requires_grad=True).to(targets) 
+        l_mse_rel = torch.tensor(0.0, requires_grad=True).to(targets)
+        l_elope   = torch.tensor(0.0, requires_grad=True).to(targets)
+         
         # Compute the different losses
-        l_mse_abs = self.lmb_mse_abs*loss_mse_abs(vel_pred, vel_target)
-        l_mse_rel = self.lmb_mse_rel*loss_mse_rel(vel_pred, vel_target)
-        l_elope   = self.lmb_elope*loss_elope(vel_pred, vel_target, pos_target)
+        if self.lmb_mse_abs != 0: 
+            l_mse_abs = self.lmb_mse_abs*loss_mse_abs(vel_pred, vel_target)
+            total_loss += l_mse_abs
+            
+        if self.lmb_mse_rel != 0: 
+            l_mse_rel = self.lmb_mse_rel*loss_mse_rel(vel_pred, vel_target)
+            total_loss += l_mse_rel
         
-        # Compute the global loss function
-        total_loss  = l_elope + l_mse_abs + l_mse_rel
+        if self.lmb_elope != 0: 
+            l_elope = self.lmb_elope*loss_elope(vel_pred, vel_target, pos_target)
+            total_loss += l_elope
         
         loss = {
             'vel_mse_abs_loss': l_mse_abs, 
@@ -154,7 +167,7 @@ class LunarTrainer:
         # Create the bar to display current iterations
         tbar = tqdm.tqdm(
             self.train_loader, desc=f"       Epoch {epoch:02d}/{num_epochs:02d}", unit="i", 
-            ncols=90, miniters=5
+            ncols=120, miniters=5
         )
         
         for i, (events, imu, rangemeter, targets, times) in enumerate(tbar):
@@ -180,6 +193,7 @@ class LunarTrainer:
             loss = loss_dict['total_loss']
             
             # Backward pass
+            # with torch.autograd.detect_anomaly():
             loss.backward()
             
             # Gradient clipping for stability
