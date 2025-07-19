@@ -257,7 +257,7 @@ class SequenceLoader:
             targets[:, 3:6] = -targets[:, 3:6]
             
             # Flip the events (we still have the first that is referred to the last state)
-            events = events[::-1]
+            events_tensor = events_tensor[::-1]
         
         return {
             'events_tensor': torch.from_numpy(events_tensor), 
