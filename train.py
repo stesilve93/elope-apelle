@@ -1,19 +1,19 @@
 
-
 import torch 
 
 from pathlib import Path 
 
-from elope.datasets import ElopeDataset, ElopeDataLoader
+from elope.datasets import ElopeDataLoader
 from elope.models.emmnetVelGru import MultiModalVelocityEstimator
 from elope.trainers import LunarTrainer
-from elope.utils import LOGGER, increment_path
+from elope.utils import LOGGER
 
 # Path to the yaml file containing the dataset settings
-DATASET_CFG = "cfg/dataset/dataset-5s.yml"
+# DATASET_CFG = "cfg/dataset/dataset-5s-count-20b.yml"
+DATASET_CFG = "cfg/dataset/dataset-5s-stamp.yml"
 
 # Path to the yaml file containing the model settings
-MODEL_CFG = "cfg/training/emmnet-v1.yml"
+MODEL_CFG = "cfg/training/emmnet-v1-mse-rel.yml"
 
 # Device configuration 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -31,7 +31,10 @@ train_loader = ElopeDataLoader(
     augment=True, 
     batch_size=32,
     shuffle=True, 
-    num_workers=8
+    num_workers=8, 
+    rangemeter_noise=0.01, 
+    angles_noise=0.005, 
+    angles_vel_noise=0.005
 )
 
 val_loader = ElopeDataLoader(
@@ -44,7 +47,11 @@ val_loader = ElopeDataLoader(
 )
 
 # Create the network model 
-model = MultiModalVelocityEstimator.create_model(MODEL_CFG, device=device)
+model = MultiModalVelocityEstimator.create_model(
+    MODEL_CFG, 
+    device=device, 
+    event_channels=train_loader.cfg_dataset["events"]["channels"]
+)
 
 # Create the trainer for the model 
 trainer = LunarTrainer(MODEL_CFG, model, train_loader, val_loader, device)
