@@ -57,14 +57,14 @@ class PhysicsConsistencyGate(nn.Module):
         physics_residual = torch.abs(angle_derivatives - expected_derivatives)
         
         # Aggregate over time and angles
-        residual_magnitude = torch.mean(physics_residual, dim=[1, 2])  # (B,)
+        residual_magnitude = torch.mean(physics_residual, dim=[0, 1, 2])  # (B,)
         
         # Convert to consistency score (high residual = low consistency)
         consistency_score = self.consistency_encoder(
             physics_residual.mean(dim=1)  # (B, 3)
         )  # (B, 1)
         
-        return consistency_score
+        return consistency_score, residual_magnitude
     
     def _body_to_world_rates(self, angles, body_rates):
         """Convert body rates to world frame angle derivatives"""
@@ -200,7 +200,7 @@ class PhysicsAwareIMUEncoder(nn.Module):
         body_rates = x[..., 3:]
         
         # Get physics consistency score
-        consistency_score = self.physics_gate(angles, body_rates)  # (B, 1)
+        consistency_score, kin_loss = self.physics_gate(angles, body_rates)  # (B, 1)
         
         # Project input features
         x_proj = self.input_proj(x) * math.sqrt(self.d_model)
@@ -224,7 +224,7 @@ class PhysicsAwareIMUEncoder(nn.Module):
         x_pooled = x_modulated.mean(dim=1)
         output = self.output_proj(x_pooled)
         
-        return output, consistency_score
+        return output, consistency_score, kin_loss
 
 
 class KinematicConstraintLayer(nn.Module):
@@ -868,7 +868,7 @@ class MultiModalVelocityEstimator(nn.Module):
         # Extract features
         event_feat = self.event_encoder(event_tensor)
         if self.use_physics_aware:
-            imu_feat, consistency_score = self.imu_encoder(imu_tensor)
+            imu_feat, consistency_score, kin_loss = self.imu_encoder(imu_tensor)
         else:
             imu_feat = self.imu_encoder(imu_tensor)
             consistency_score = 0 # Placeholder for consistency score if not using physics-aware
@@ -895,5 +895,6 @@ class MultiModalVelocityEstimator(nn.Module):
             'event_features': event_feat,
             'imu_features': imu_feat,
             'range_features': range_feat,
-            'attention_weights': attention_weights
+            'attention_weights': attention_weights,
+            'kin_loss': kin_loss if self.use_physics_aware else 0
         }

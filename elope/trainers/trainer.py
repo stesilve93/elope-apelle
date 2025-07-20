@@ -173,8 +173,10 @@ class LunarTrainer:
             
             # Compute loss
             loss_dict = self.weighted_pose_loss(predictions, targets)
-            loss = loss_dict['total_loss']
-            
+            #loss = loss_dict['total_loss']
+            # FIXME: Add kinematic loss to the standard structure if useful!!
+            loss = loss_dict['total_loss'] + 0.1*outputs['kin_loss'] if 'kin_loss' in outputs else 0
+
             # Backward pass
             loss.backward()
             
