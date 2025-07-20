@@ -14,7 +14,7 @@ weights:
 velocity_only: True
 
 # True if a physics-aware IMU encoder should be used
-physics_aware: False
+physics_aware: True
 
 # True if attention should be used to determine the fusion strategy
 use_attention: True
