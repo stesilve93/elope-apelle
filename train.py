@@ -79,7 +79,7 @@ timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 # Generates the folder in which to store the data
 SAVE_NAME = cfg_weights["name"] + f"_{timestamp}"
 SAVE_PATH = increment_path(Path(cfg_weights["path"]) / SAVE_NAME, exist_ok=False)
-SAVE_PATH.mdkir(parents=True)
+SAVE_PATH.mkdir(parents=True)
 
 LOGGER.info(f"Saving training output to {SAVE_PATH} directory.")
 
