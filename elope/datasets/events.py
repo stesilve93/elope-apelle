@@ -200,7 +200,7 @@ class EventProcessor:
             ev_1 = _events_to_tensor_count(events, time, H, W, 1, time_window, side, clamp)
             ev_2 = _events_to_tensor_timestamp(events, time, H, W, time_window, side)
             
-            return torch.vstack((ev_1, ev_2))
+            return np.vstack((ev_1, ev_2))
         
         else: 
             raise ValueError(f"`{method}` is not a valid event encoding method.")
@@ -408,4 +408,4 @@ def _events_to_tensor_timestamp(
         first_timestamp = first_timestamp[:, :, ::-1]
     
     # Stack the two channels 
-    return np.vstack((first_timestamp, last_timestamp)).astype(np.float32)
+    return np.stack((first_timestamp, last_timestamp), axis=0).astype(np.float32)
