@@ -775,7 +775,7 @@ class RegularizedRegressor(nn.Module):
 class MultiModalVelocityEstimator(nn.Module):
     """ Multi-modal network with better regularization"""
     def __init__(self, 
-                 event_channels: int = 2,
+                 event_channels: int = 1,
                  event_output_dim: int = 128,
                  imu_output_dim: int = 32,
                  range_output_dim: int = 16,
@@ -831,7 +831,7 @@ class MultiModalVelocityEstimator(nn.Module):
         self._init_weights()
     
     @staticmethod 
-    def create_model(cfg: str | Path | dict, device: str="cpu"):
+    def create_model(cfg: str | Path | dict, device: str="cpu", **kwargs):
         """Factory function to create the improved model"""
         
         # Retrieve the model configuration
@@ -841,7 +841,8 @@ class MultiModalVelocityEstimator(nn.Module):
         model = MultiModalVelocityEstimator(
             use_attention=bool(cfg["use_attention"]), 
             dropout=float(cfg["dropout"]),
-            use_physics_aware=bool(cfg["physics_aware"])
+            use_physics_aware=bool(cfg["physics_aware"], 
+            **kwargs)
         )
         
         return model.to(device)
