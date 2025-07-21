@@ -335,7 +335,7 @@ def _events_to_tensor_timestamp(
     else: 
         t_beg = time  
         first_timestamp = np.zeros((H, W, 2))
-        out_timestamp   = np.ones((H, W, 2))
+        last_timestamp   = np.ones((H, W, 2))
     
     # Filter positive events
     mask_pos = events[:, 2] == 1
