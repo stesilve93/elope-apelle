@@ -1,5 +1,6 @@
 
 import numpy as np 
+import torch
 
 from numba import njit
 
@@ -192,10 +193,10 @@ class EventProcessor:
 
     @staticmethod
     def normalize_tensor(
-        tensor: np.ndarray, method: str='standard', min_val: float=None, max_val: float=None
-    ) -> np.ndarray:
+        tensor: torch.Tensor, method: str='standard', min_val: float=None, max_val: float=None
+    ) -> torch.Tensor:
         """Normalize event tensor"""
-        
+            
         if method == 'standard':
             # Z-score normalization
             mean = tensor.mean()
@@ -214,7 +215,7 @@ class EventProcessor:
         else: 
             raise ValueError(f"`{method}` is an unsupported normalization method.")
         
-        return tensor.astype(np.float32)
+        return tensor
 
 def _events_to_tensor_count(
     events: np.ndarray, time: float, H: int, W: int, T: int, time_window: float, side: str, 
