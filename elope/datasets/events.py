@@ -1,5 +1,6 @@
 
 import numpy as np 
+import torch
 
 from numba import njit
 
@@ -67,7 +68,10 @@ class EventProcessor:
         ev_frame : numpy.ndarray
             Event frame representation with shape (height, width, 3)
         """
-        # FIXME: This function is not used in the current implementation, but it can be used to visualize events in a frame-like representation.
+        
+        # TODO: This function is not used in the current implementation, but it can be 
+        # used to visualize events in a frame-like representation.
+        
         # Create empty frame
         ev_frame = np.zeros((self.height, self.width), dtype=np.float32)
         # Determine latest events (previous events of the slice will be ignored in this representation)
@@ -80,7 +84,8 @@ class EventProcessor:
         # Create empty event frame
         ev_frame = np.zeros([200, 200, 3], dtype=np.uint8)
 
-        # To be easy on the eye, we will use a blueish color for negative polarity and white for positive polarity
+        # To be easy on the eye, we will use a blueish color for negative polarity and 
+        # white for positive polarity
         ev_frame[pos_ev['x'], pos_ev['y']] = [255, 255, 255]
         ev_frame[neg_ev['x'], neg_ev['y']] = [80, 137, 204]
 
@@ -188,10 +193,10 @@ class EventProcessor:
 
     @staticmethod
     def normalize_tensor(
-        tensor: np.ndarray, method: str='standard', min_val: float=None, max_val: float=None
-    ) -> np.ndarray:
+        tensor: torch.Tensor, method: str='standard', min_val: float=None, max_val: float=None
+    ) -> torch.Tensor:
         """Normalize event tensor"""
-        
+            
         if method == 'standard':
             # Z-score normalization
             mean = tensor.mean()
@@ -210,8 +215,7 @@ class EventProcessor:
         else: 
             raise ValueError(f"`{method}` is an unsupported normalization method.")
         
-        return tensor.astype(np.float32)
-
+        return tensor
 
 def _events_to_tensor_count(
     events: np.ndarray, time: float, H: int, W: int, T: int, time_window: float, side: str, 

@@ -10,6 +10,10 @@ weights:
   # Specify every how many epochs the model weights should be saved.
   checkpoint_epochs: 5
 
+# Type of normalization for the event tensor. Supported values are "null", "standard", 
+# or "minmax".
+event_normalization: "standard"
+
 # True if the network should only provide the velocity as an input
 velocity_only: True
 

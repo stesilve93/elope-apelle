@@ -1,4 +1,9 @@
 
+from .cheats import (
+    compute_posz,
+    compute_posvelz
+)
+
 from .misc import (
     load_pickle,
     load_yaml, 

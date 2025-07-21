@@ -19,7 +19,6 @@ class SequenceLoader:
         datapath: str | Path, 
         event_integration_window: float = 1e5, 
         event_encoder_method: str = "last_timestamp", 
-        event_normalization: str = "standard",
         event_clamp: int = -1,
         event_H : int = 200,
         event_W : int = 200,
@@ -37,8 +36,6 @@ class SequenceLoader:
             Integration time window for the events, in microseconds. Defaults to `1e5`. 
         event_encoder_method : str, optional
             Type of event encoding. Defaults to `last_timestamp`.
-        event_normalization : str, optional
-            Type of event normalization. Defaults to `standard`.
         event_clamp : int, optional 
             Maximum value for the time bins. Defaults to 10.
         event_H, event_W, event_T : int, optional
@@ -62,7 +59,6 @@ class SequenceLoader:
         # Store the settings for the events processing
         self.event_integration_window = float(event_integration_window)
         self.event_encoder_method = event_encoder_method
-        self.event_norm = event_normalization
         
         self.event_clamp = event_clamp
         
@@ -360,14 +356,6 @@ class SequenceLoader:
             events_array, 1e6*time, H, W, T, method=self.event_encoder_method, 
             time_window=self.event_integration_window, side=side, clamp=self.event_clamp
         )
-        
-        # Normalize the tensor using standard normalization 
-        if self.event_norm != "null":
-            
-            max_val = self.event_clamp if self.event_clamp > 0 else None        
-            tensor = self.processor.normalize_tensor(
-                tensor, method=self.event_norm, max_val=max_val
-            )
         
         # Re-arrange the tensor dimensions to PyTorch format (Channels, Time, Height, Width)
         tensor = np.transpose(tensor, (3, 0, 1, 2))
