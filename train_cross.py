@@ -25,7 +25,7 @@ MODEL_CFG = "cfg/training/emmnet-v1.yml"
 N_GROUPS = 7
 
 # Maximum number of training epochs
-MAX_EPOCHS = 100
+MAX_EPOCHS = 2
 
 # Maximum epoch patience per training
 MAX_EPOCHS_PATIENCE = 30
@@ -70,6 +70,7 @@ SAVE_PATH.mkdir(parents=True)
 PLOT_PATH = increment_path(Path("plots") / "training" / SAVE_NAME, exist_ok=False)
 PLOT_PATH.mkdir(parents=True)
 
+LOGGER.info("Model seq2seq: %s", model_cfg["seq2seq"])
 LOGGER.info(f"Saving cross-training output to {SAVE_PATH} directory.")
 
 # Copy inside the folder the configuration yamls for the dataset and the model 
@@ -113,8 +114,6 @@ for k in range(N_GROUPS):
         num_workers=4
     )
 
-    LOGGER.info("Model seq2seq: %s", model_cfg["seq2seq"])
-
     # Create the network model 
     model = MultiModalVelocityEstimator.create_model(MODEL_CFG, device=device)
 
@@ -124,12 +123,11 @@ for k in range(N_GROUPS):
 
     save_path_k = SAVE_PATH / f"group-{k}"
     save_path_k.mkdir(parents=True)
-    
 
     # Train the model (skipping the intermediate saving of all single groups)
     trainer.train(num_epochs=MAX_EPOCHS, max_patience=MAX_EPOCHS_PATIENCE, save_path=save_path_k)
     trainer.plot_training(save_figure=True, path=PLOT_PATH, filename=f"training_{k}.png")
-    LOGGER.info("Training completed for group {k}!")
+    LOGGER.info(f"Training completed for group {k}!")
     
     # Add this statistics to the table
     tab_values.append([k, trainer.best_val_loss, groups[k]])

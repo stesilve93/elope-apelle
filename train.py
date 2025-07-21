@@ -83,7 +83,7 @@ SAVE_PATH.mkdir(parents=True)
 
 # Generate the path for the plots 
 PLOT_PATH = Path("plots") / "training"
-PLOT_PATH.mkdir(parents=True)
+PLOT_PATH.mkdir(parents=True, exist_ok=True)
 
 LOGGER.info(f"Saving training output to {SAVE_PATH} directory.")
 
@@ -92,7 +92,7 @@ shutil.copy(DATASET_CFG, SAVE_PATH / "dataset-cfg.yml")
 shutil.copy(MODEL_CFG, SAVE_PATH / "model-cfg.yml")
 
 # Train the model 
-trainer.train(num_epochs=500, max_patience=30, save_path=SAVE_PATH)
+trainer.train(num_epochs=5, max_patience=30, save_path=SAVE_PATH)
 trainer.plot_training(save_figure=True, path=PLOT_PATH, filename=f"training_{timestamp}")
 
 LOGGER.info("Training completed!")
