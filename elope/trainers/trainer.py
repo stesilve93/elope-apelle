@@ -74,13 +74,13 @@ class LunarTrainer:
         
         if not self.seq2seq: 
             # If we are only predicting the final state, retrieve only that part.
-            targets = targets[:, -1]
+            targets = targets[:, -1] # B, 6 else: (B, T, 6)
             
-        pos_target = targets[:, 0:3]
-        vel_target = targets[:, 3:6]
-        
+        pos_target = targets[..., 0:3]
+        vel_target = targets[..., 3:6]
+
         # Retrieve the predicted velocities
-        vel_pred = predictions[:, 0:3] if self.velocity_only else predictions[:, 3:6]
+        vel_pred = predictions[..., 0:3] if self.velocity_only else predictions[..., 3:6]
         
         # Assemble the global loss function
         total_loss = torch.tensor(0.0, requires_grad=True).to(targets)
@@ -121,8 +121,8 @@ class LunarTrainer:
         with torch.no_grad():
             
             # Retrieve groundthruth values 
-            pos_target = targets[:, 0:3]
-            vel_target = targets[:, 3:6]
+            pos_target = targets[..., 0:3]
+            vel_target = targets[..., 3:6]
             
             metrics = {}
             
@@ -130,8 +130,8 @@ class LunarTrainer:
             if not velocity_only:
                 
                 # Retrieve network predictions
-                pos_pred = predictions[:, 0:3]
-                vel_pred = predictions[:, 3:6]
+                pos_pred = predictions[..., 0:3]
+                vel_pred = predictions[..., 3:6]
                 
                 # Compute the position absolute and relative MSE 
                 metrics["pos_mse_abs"] = loss_mse_abs(pos_pred, pos_target)
@@ -140,7 +140,7 @@ class LunarTrainer:
             else:
                 
                 # Retrieve the velocity predictions
-                vel_pred = predictions[:, 0:3]
+                vel_pred = predictions[..., 0:3]
             
             # Compute the velocity absolute and relative MSE
             vel_mse_abs = loss_mse_abs(vel_pred, vel_target) 

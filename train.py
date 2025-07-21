@@ -8,11 +8,12 @@ from elope.models.emmnetVelGru import MultiModalVelocityEstimator
 from elope.trainers import LunarTrainer
 from elope.utils import LOGGER, load_yaml
 
+
 # Path to the yaml file containing the dataset settings
 DATASET_CFG = "cfg/dataset/dataset-5s-stamp-left-1us.yml"
 
 # Path to the yaml file containing the model settings
-MODEL_CFG = "cfg/training/emmnet-v1-elope.yml"
+MODEL_CFG = "cfg/training/emmnet-v2-reduced.yml"
 
 # Device configuration 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -50,14 +51,28 @@ val_loader = ElopeDataLoader(
     num_workers=4
 )
 
+# Retrieve the model configuration
+if isinstance(MODEL_CFG, (str, Path)): 
+    cfg = load_yaml(MODEL_CFG)
+
+if bool(cfg["seq2seq"]):
+    from elope.models.emmnetVelGru_s2s import MultiModalVelocityEstimator
+else:
+    from elope.models.emmnetVelGru import MultiModalVelocityEstimator
+
+LOGGER.info("Model seq2seq: %s", cfg["seq2seq"])
 # Create the network model 
-model = MultiModalVelocityEstimator.create_model(MODEL_CFG, device=device)
+model = MultiModalVelocityEstimator.create_model(
+    MODEL_CFG, 
+    device=device, 
+)
+
 
 # Create the trainer for the model 
 trainer = LunarTrainer(MODEL_CFG, model, train_loader, val_loader, device)
 
 # Train the model 
-trainer.train(num_epochs=100, max_patience=30)
+trainer.train(num_epochs=500, max_patience=30)
 
 trainer.plot_training(save_figure=True, figure_name_prefix="./plots/training/training")
 LOGGER.info("Training completed!")
