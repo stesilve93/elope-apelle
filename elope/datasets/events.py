@@ -186,10 +186,10 @@ class EventProcessor:
             return _events_to_tensor_count(events, time, H, W, T, time_window, side, clamp)
         
         elif method == "first_timestamp": 
-            return _events_to_tensor_timestamp(events, time, H, W, time_window, side)[0]
+            return _events_to_tensor_timestamp(events, time, H, W, time_window, side)[0:1]
         
         elif method == "last_timestamp": 
-            return _events_to_tensor_timestamp(events, time, H, W, time_window, side)[1]
+            return _events_to_tensor_timestamp(events, time, H, W, time_window, side)[1:2]
         
         elif method == "timestamp": 
             return _events_to_tensor_timestamp(events, time, H, W, time_window, side)
