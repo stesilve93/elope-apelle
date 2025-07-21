@@ -13,7 +13,7 @@ from elope.utils import LOGGER, increment_path
 DATASET_CFG = "cfg/dataset/dataset-5s.yml"
 
 # Path to the yaml file containing the model settings
-MODEL_CFG = "cfg/training/emmnet-v1.yml"
+MODEL_CFG = "cfg/training/emmnet-v2.yml"
 
 # Device configuration 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

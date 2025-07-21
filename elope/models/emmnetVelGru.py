@@ -10,10 +10,150 @@ from pathlib import Path
 
 from elope.utils import load_yaml
 
+class PhysicsConsistencyGate(nn.Module):
+    """
+    Self-supervised physics gate that modulates features based on kinematic consistency
+    """
+    def __init__(self, hidden_dim: int = 64):
+        """
+        Initialize the PhysicsConsistencyGate module
+        
+        Parameters
+        ----------
+        hidden_dim : int, optional
+            The number of hidden units in the physics consistency encoder, by default 64
+        """
+        super().__init__()
+        
+        # Learnable physics consistency encoder
+        self.consistency_encoder = nn.Sequential(
+            # Input residual vector (3 elements)
+            nn.Linear(3, hidden_dim // 4),  
+            # GELU activation function
+            nn.GELU(),
+            # Output consistency score (1 element)
+            nn.Linear(hidden_dim // 4, 1),
+            # Sigmoid activation function to output a score in [0, 1]
+            nn.Sigmoid()  
+        )
+        
+    def forward(self, angles, body_rates):
+        """
+        Calculate physics consistency and return gating weights
+        """
+        if angles.size(1) < 2:
+            # Not enough temporal data for consistency check
+            return torch.ones(angles.size(0), 1, device=angles.device)
+        
+        # Calculate actual angle derivatives
+        angle_derivatives = torch.diff(angles, dim=1)  # (B, T-1, 3)
+        
+        # Calculate expected derivatives from kinematics
+        expected_derivatives = self._body_to_world_rates(
+            angles[:, :-1], body_rates[:, :-1]
+        )  # (B, T-1, 3)
+        
+        # Physics residual (how much they disagree)
+        physics_residual = torch.abs(angle_derivatives - expected_derivatives)
+        
+        # Aggregate over time and angles
+        residual_magnitude = torch.mean(physics_residual, dim=[0, 1, 2])  # (B,)
+        
+        # Convert to consistency score (high residual = low consistency)
+        consistency_score = self.consistency_encoder(
+            physics_residual.mean(dim=1)  # (B, 3)
+        )  # (B, 1)
+        
+        return consistency_score, residual_magnitude
+    
+    def _body_to_world_rates(self, angles, body_rates):
+        """Convert body rates to world frame angle derivatives"""
+        phi, theta, psi = angles[..., 0], angles[..., 1], angles[..., 2]
+        p, q, r = body_rates[..., 0], body_rates[..., 1], body_rates[..., 2]
+        
+        cos_phi = torch.cos(phi)
+        sin_phi = torch.sin(phi)
+        cos_theta = torch.cos(theta)
+        sin_theta = torch.sin(theta)
+        
+        cos_theta_safe = torch.clamp(cos_theta, min=1e-6)
+        tan_theta = sin_theta / cos_theta_safe
+        sec_theta = 1.0 / cos_theta_safe
+        
+        phi_dot = p + q * sin_phi * tan_theta + r * cos_phi * tan_theta
+        theta_dot = q * cos_phi - r * sin_phi
+        psi_dot = (q * sin_phi + r * cos_phi) * sec_theta
+        
+        return torch.stack([phi_dot, theta_dot, psi_dot], dim=-1)
+    
+class PhysicsModulatedTransformerLayer(nn.Module):
+    """
+    Transformer layer with physics-modulated attention
+    """
+    def __init__(self, d_model: int, n_heads: int, dropout: float = 0.1):
+        """
+        Initialize a single layer of the transformer model with physics-modulated attention.
+        
+        Args:
+            d_model (int): The dimensionality of the model.
+            n_heads (int): The number of attention heads.
+            dropout (float): The dropout probability (default: 0.1).
+        """
+        super().__init__()
+        
+        # Standard self-attention
+        self.attention = nn.MultiheadAttention(
+            d_model, n_heads, dropout=dropout, batch_first=True
+        )
+        
+        # Physics-modulated attention weights
+        self.physics_attention_gate = nn.Sequential(
+            # Project the consistency score to the model dimensionality
+            nn.Linear(1, d_model),
+            # Apply a sigmoid activation function to get a gating value in [0, 1]
+            nn.Sigmoid()
+        )
+        
+        # Feed-forward network
+        self.ffn = nn.Sequential(
+            # First linear layer
+            nn.Linear(d_model, d_model * 2),
+            # GELU activation function
+            nn.GELU(),
+            # Dropout
+            nn.Dropout(dropout),
+            # Second linear layer
+            nn.Linear(d_model * 2, d_model)
+        )
+        
+        # Layer normalization
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        # Dropout
+        self.dropout = nn.Dropout(dropout)
+        
+    def forward(self, x, consistency_score):
+        # Standard self-attention
+        attn_out, _ = self.attention(x, x, x)
+        
+        # Physics-modulated attention gating
+        physics_gate = self.physics_attention_gate(consistency_score).unsqueeze(1)  # (B, 1, d_model)
+        
+        # Apply physics modulation
+        attn_out = attn_out * physics_gate
+        
+        # Residual connection
+        x = self.norm1(x + attn_out)
+        
+        # Feed-forward
+        ffn_out = self.ffn(x)
+        x = self.norm2(x + ffn_out)
+        
+        return x
+
 class PhysicsAwareIMUEncoder(nn.Module):
     """
-    IMU encoder that leverages the known relationship between Euler angles 
-    and angular velocities to create richer input features
+    IMU encoder with embedded physics consistency constraint
     """
     def __init__(self, input_dim: int = 6, d_model: int = 64, output_dim: int = 32, 
                  n_heads: int = 4, n_layers: int = 2, dropout: float = 0.1):
@@ -31,33 +171,23 @@ class PhysicsAwareIMUEncoder(nn.Module):
         super().__init__()
         self.d_model = d_model
         
-        # Initialize the physics-informed feature extractor
-        self.physics_features = PhysicsAwareFeatures()
+        # Physics consistency gate
+        self.physics_gate = PhysicsConsistencyGate(d_model)
         
-        # Calculate the total input dimension by combining original and physics features
-        physics_feat_dim = self.physics_features.get_feature_dim()
-        total_input_dim = input_dim + physics_feat_dim
+        # Input projection with physics-aware scaling
+        self.input_proj = nn.Linear(input_dim, d_model)
+        self.physics_proj = nn.Linear(1, d_model)  # Project consistency score
         
-        # Project the enriched input features to the model dimension
-        self.input_proj = nn.Linear(total_input_dim, d_model)
-        
-        # Positional encoding for temporal information
+        # Positional encoding
         self.pos_encoding = PositionalEncoding(d_model)
         
-        # Define the transformer encoder layer
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=n_heads,
-            dim_feedforward=d_model * 2,
-            dropout=dropout,
-            activation='gelu',  # GELU activation often outperforms ReLU
-            batch_first=True
-        )
+        # Transformer with physics-modulated attention
+        self.transformer_layers = nn.ModuleList([
+            PhysicsModulatedTransformerLayer(d_model, n_heads, dropout)
+            for _ in range(n_layers)
+        ])
         
-        # Stack transformer encoder layers
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
-        
-        # Output projection to desired output dimension
+        # Output projection
         self.output_proj = nn.Sequential(
             nn.LayerNorm(d_model),
             nn.Dropout(dropout),
@@ -66,87 +196,128 @@ class PhysicsAwareIMUEncoder(nn.Module):
         
     def forward(self, x):
         # Input shape: (B, T, 6) - [phi, theta, psi, p, q, r]
-        B, T, _ = x.shape
+        angles = x[..., :3]
+        body_rates = x[..., 3:]
         
-        # Extract physics-aware features
-        physics_feat = self.physics_features(x)
+        # Get physics consistency score
+        consistency_score, kin_loss = self.physics_gate(angles, body_rates)  # (B, 1)
         
-        # Combine original with physics features
-        enriched_input = torch.cat([x, physics_feat], dim=-1)
+        # Project input features
+        x_proj = self.input_proj(x) * math.sqrt(self.d_model)
         
-        # Project to model dimension
-        x = self.input_proj(enriched_input) * math.sqrt(self.d_model)
+        # Create physics-aware feature modulation
+        physics_modulation = self.physics_proj(consistency_score).unsqueeze(1)  # (B, 1, d_model)
+        
+        # Apply physics modulation to input
+        x_modulated = x_proj + physics_modulation
         
         # Add positional encoding
-        x = x.transpose(0, 1)
-        x = self.pos_encoding(x)
-        x = x.transpose(0, 1)
+        x_modulated = x_modulated.transpose(0, 1)
+        x_modulated = self.pos_encoding(x_modulated)
+        x_modulated = x_modulated.transpose(0, 1)
         
-        # Apply transformer
-        x = self.transformer(x)
+        # Apply transformer layers with physics awareness
+        for layer in self.transformer_layers:
+            x_modulated = layer(x_modulated, consistency_score)
         
-        # Global average pooling
-        x = x.mean(dim=1)
+        # Global pooling and output
+        x_pooled = x_modulated.mean(dim=1)
+        output = self.output_proj(x_pooled)
         
-        # Final projection
-        x = self.output_proj(x)
-        
-        return x
+        return output, consistency_score, kin_loss
 
 
-class PhysicsAwareFeatures(nn.Module):
+class KinematicConstraintLayer(nn.Module):
     """
-    Extract physics-based features from IMU data using known relationships
-    between Euler angles and angular velocities
+    Layer that enforces kinematic constraints through feature rectification
     """
-    def __init__(self):
+    def __init__(self, feature_dim: int):
         """
-        Extract physics-based features from IMU data using known relationships
-        between Euler angles and angular velocities
+        Initialize the KinematicConstraintLayer.
+        
+        Args:
+            feature_dim (int): Dimension of the input features.
         """
         super().__init__()
         
+        # Learnable constraint enforcement
+        self.constraint_encoder = nn.Sequential(
+            nn.Linear(feature_dim, feature_dim // 2),
+            nn.GELU(),
+            nn.Linear(feature_dim // 2, feature_dim),
+            nn.Tanh()  # Bounded correction
+        )
         
-    def get_feature_dim(self):
-        """Returns dimension of physics-aware features"""
-        return 12  # 3 world_rates + 3 coupling_terms + 3 rate_magnitudes + 3 derivatives
+        # Adaptive mixing parameter
+        self.mixing_param = nn.Parameter(torch.tensor(0.5))
         
-    def forward(self, x):
-        # Input: (B, T, 6) - [phi, theta, psi, p, q, r]
-        angles = x[..., :3]  # phi, theta, psi
-        body_rates = x[..., 3:]  # p, q, r
-        
-        # Feature 1: Convert body rates to world frame rates (Euler angle derivatives)
-        world_rates = self._body_to_world_rates(angles, body_rates)
-        
-        # Feature 2: Coupling terms that capture interaction between rotations
-        coupling_terms = self._compute_coupling_terms(angles, body_rates)
-        
-        # Feature 3: Rate magnitudes and relationships
-        rate_features = self._compute_rate_features(angles, body_rates)
-        
-        # Feature 4: Temporal derivatives (if sequence length > 1)
-        derivative_features = self._compute_derivatives(angles, body_rates)
-        
-        # Combine all features
-        physics_features = torch.cat([
-            world_rates,
-            coupling_terms, 
-            rate_features,
-            derivative_features
-        ], dim=-1)
-        
-        return physics_features
-    
-    def _body_to_world_rates(self, angles, body_rates):
+    def forward(self, features, raw_imu_data):
         """
-        Convert body frame angular velocities to world frame (Euler angle derivatives)
-        This gives us φ̇, θ̇, ψ̇ from p, q, r
+        Apply kinematic constraint rectification to features.
+
+        Kinematic constraints are used to enforce the physical relationship
+        between the angular velocities and the Euler angles.
+
+        Args:
+            features (torch.Tensor): The input features to rectify.
+            raw_imu_data (torch.Tensor): The raw IMU data used to enforce
+                the kinematic constraints.
+
+        Returns:
+            The corrected features after applying kinematic constraint
+            rectification.
+        """
+        # Extract physics information
+        angles = raw_imu_data[..., :3]
+        body_rates = raw_imu_data[..., 3:]
+        
+        if angles.size(1) < 2:
+            return features
+        
+        # Calculate kinematic consistency
+        angle_derivatives = torch.diff(angles, dim=1)
+        expected_derivatives = self._body_to_world_rates(
+            angles[:, :-1], body_rates[:, :-1]
+        )
+        
+        # Compute correction signal
+        kinematic_residual = torch.mean(
+            torch.abs(angle_derivatives - expected_derivatives), 
+            dim=[1, 2]
+        )  # (B,)
+        
+        # Generate feature correction
+        correction = self.constraint_encoder(features)
+        correction_weight = torch.sigmoid(-kinematic_residual).unsqueeze(-1)  # (B, 1)
+        
+        # Apply adaptive correction
+        corrected_features = features + correction_weight * correction
+        
+        return corrected_features
+    
+    def _body_to_world_rates(self, angles: torch.Tensor, body_rates: torch.Tensor) -> torch.Tensor:
+        """
+        Convert body rates to world frame angle derivatives
+
+        This function takes in the body rates and the Euler angles and returns
+        the derivatives of the Euler angles with respect to time.
+
+        Args:
+            angles (torch.Tensor): A tensor of shape (B, T, 3) where B is the
+                batch size, T is the sequence length, and 3 is the number of
+                Euler angles.
+            body_rates (torch.Tensor): A tensor of shape (B, T, 3) where B is
+                the batch size, T is the sequence length, and 3 is the number of
+                body rates.
+
+        Returns:
+            A tensor of shape (B, T, 3) where B is the batch size, T is the
+            sequence length, and 3 is the number of Euler angle derivatives.
         """
         phi, theta, psi = angles[..., 0], angles[..., 1], angles[..., 2]
         p, q, r = body_rates[..., 0], body_rates[..., 1], body_rates[..., 2]
         
-        # Trigonometric terms
+        # Calculate trigonometric terms
         cos_phi = torch.cos(phi)
         sin_phi = torch.sin(phi)
         cos_theta = torch.cos(theta)
@@ -157,60 +328,12 @@ class PhysicsAwareFeatures(nn.Module):
         tan_theta = sin_theta / cos_theta_safe
         sec_theta = 1.0 / cos_theta_safe
         
-        # Transformation: body rates -> world rates
+        # Calculate world frame angle derivatives
         phi_dot = p + q * sin_phi * tan_theta + r * cos_phi * tan_theta
         theta_dot = q * cos_phi - r * sin_phi
         psi_dot = (q * sin_phi + r * cos_phi) * sec_theta
         
-        world_rates = torch.stack([phi_dot, theta_dot, psi_dot], dim=-1)
-        return world_rates
-    
-    def _compute_coupling_terms(self, angles, body_rates):
-        """
-        Compute coupling terms that capture how different rotation axes interact
-        """
-        phi, theta, psi = angles[..., 0], angles[..., 1], angles[..., 2]
-        p, q, r = body_rates[..., 0], body_rates[..., 1], body_rates[..., 2]
-        
-        # Cross-coupling terms
-        pq_coupling = p * q  # Roll-pitch coupling
-        pr_coupling = p * r  # Roll-yaw coupling  
-        qr_coupling = q * r  # Pitch-yaw coupling
-        
-        coupling_terms = torch.stack([pq_coupling, pr_coupling, qr_coupling], dim=-1)
-        return coupling_terms
-    
-    def _compute_rate_features(self, angles, body_rates):
-        """
-        Compute magnitude and relationship features
-        """
-        # Total angular rate magnitude
-        total_rate = torch.norm(body_rates, dim=-1, keepdim=True)
-        
-        # Dominant rotation axis (which component is largest)
-        abs_rates = torch.abs(body_rates)
-        max_rate, dominant_axis = torch.max(abs_rates, dim=-1, keepdim=True)
-        
-        # Rate ratios (how balanced are the rotations)
-        p, q, r = body_rates[..., 0:1], body_rates[..., 1:2], body_rates[..., 2:3]
-        rate_ratio_pq = p / (torch.abs(q) + 1e-6)  # Roll/pitch ratio
-        rate_ratio_pr = p / (torch.abs(r) + 1e-6)  # Roll/yaw ratio
-        
-        rate_features = torch.cat([total_rate, max_rate, rate_ratio_pq], dim=-1)
-        return rate_features
-    
-    def _compute_derivatives(self, angles, body_rates):
-        """
-        Compute temporal derivatives for sequences
-        """
-        if angles.size(1) > 1:
-            # Angular acceleration (derivative of body rates)
-            angular_accel = torch.diff(body_rates, dim=1)
-            angular_accel = F.pad(angular_accel, (0, 0, 0, 1), mode='replicate')
-        else:
-            angular_accel = torch.zeros_like(body_rates)
-            
-        return angular_accel
+        return torch.stack([phi_dot, theta_dot, psi_dot], dim=-1)
 
 class PositionalEncoding(nn.Module):
     """Positional encoding for transformer-based encoders"""
@@ -496,7 +619,7 @@ class CrossModalAttention(nn.Module):
     dropout (float, optional): Dropout probability for the attention mechanism and feed-forward network (default: 0.1)
     """
     def __init__(self, event_dim: int, imu_dim: int, range_dim: int, 
-                 hidden_dim: int = 128, dropout: float = 0.1):
+                 hidden_dim: int = 128, dropout: float = 0.1, use_physics_aware: bool = False):
         super().__init__()
         
         # Feature projections with layer normalization
@@ -515,7 +638,17 @@ class CrossModalAttention(nn.Module):
             # Normalize the projected features
             nn.LayerNorm(hidden_dim)
         )
-        
+
+        self.use_physics_aware = use_physics_aware
+        if self.use_physics_aware:
+            # Physics-informed modality weighting
+            self.modality_weighting = nn.Sequential(
+                nn.Linear(1, 16),  # Consistency score input
+                nn.GELU(),
+                nn.Linear(16, 3),  # Output weights for 3 modalities
+                nn.Softmax(dim=-1)
+            )
+
         # Multi-head attention with residual connections
         self.attention = nn.MultiheadAttention(
             hidden_dim, num_heads=8, dropout=dropout, batch_first=False
@@ -541,7 +674,7 @@ class CrossModalAttention(nn.Module):
         #self.modal_weights = nn.Parameter(torch.ones(3)) # Learnable weights for each modality
 
         
-    def forward(self, event_feat, imu_feat, range_feat):
+    def forward(self, event_feat, imu_feat, range_feat, consistency_score):
         # Project features
         e_proj = self.event_proj(event_feat)
         i_proj = self.imu_proj(imu_feat)
@@ -549,10 +682,24 @@ class CrossModalAttention(nn.Module):
         
         # Stack for attention (seq_len=3, batch, hidden_dim)
         features = torch.stack([e_proj, i_proj, r_proj], dim=0)
-        
-        # Self-attention with residual
-        attended, attention_weights = self.attention(features, features, features)
-        attended = self.norm1(attended + features)
+
+        if self.use_physics_aware:
+            # Physics-informed modality weighting
+            modality_weights = self.modality_weighting(consistency_score)  # (B, 3)
+            modality_weights = modality_weights.transpose(0, 1).unsqueeze(-1)  # (3, B, 1)
+            
+            # Apply physics-informed weighting
+            weighted_features = features * modality_weights
+            
+            # Self-attention
+            attended, attention_weights = self.attention(
+                weighted_features, weighted_features, weighted_features
+            )
+            attended = self.norm1(attended + weighted_features)
+        else:
+            # Self-attention with residual
+            attended, attention_weights = self.attention(features, features, features)
+            attended = self.norm1(attended + features)
         
         # Feed-forward with residual
         ffn_out = self.ffn(attended)
@@ -656,21 +803,27 @@ class MultiModalVelocityEstimator(nn.Module):
             self.imu_encoder = PhysicsAwareIMUEncoder(output_dim=imu_output_dim, dropout=dropout)
         else:
             self.imu_encoder = TransformerIMUEncoder(output_dim=imu_output_dim, dropout=dropout)
-        #self.imu_encoder = PhysicsAwareIMUEncoder(output_dim=imu_output_dim, dropout=dropout)
+
         self.range_encoder = GRURangemeterEncoder(output_dim=range_output_dim, dropout=dropout)
         
-        # Determine fusion strategy based on attention usage
+        # Determine fusion strategy based on attention usage and physics awareness
         self.use_attention = use_attention
+        self.use_physics_aware = use_physics_aware
+
         if use_attention:
             # Use cross-modal attention mechanism for feature fusion
             self.fusion = CrossModalAttention(
-                event_output_dim, imu_output_dim, range_output_dim, dropout=dropout
+                event_output_dim, imu_output_dim, range_output_dim, dropout=dropout, use_physics_aware=self.use_physics_aware
             )
             fusion_input_dim = 128  # Hidden dimension for attention
         else:
             # Simple concatenation of feature dimensions
             fusion_input_dim = event_output_dim + imu_output_dim + range_output_dim
+        if use_physics_aware:
+            # Kinematic constraint layer
+            self.kinematic_constraint = KinematicConstraintLayer(fusion_input_dim)
         
+
         # Initialize regularized regressor for final prediction
         self.regressor = RegularizedRegressor(fusion_input_dim, output_dim, dropout)
         
@@ -714,23 +867,34 @@ class MultiModalVelocityEstimator(nn.Module):
     def forward(self, event_tensor, imu_tensor, range_tensor):
         # Extract features
         event_feat = self.event_encoder(event_tensor)
-        imu_feat = self.imu_encoder(imu_tensor)
+        if self.use_physics_aware:
+            imu_feat, consistency_score, kin_loss = self.imu_encoder(imu_tensor)
+        else:
+            imu_feat = self.imu_encoder(imu_tensor)
+            consistency_score = 0 # Placeholder for consistency score if not using physics-aware
         range_feat = self.range_encoder(range_tensor)
         
         # Fusion
         if self.use_attention:
-            fused_feat, attention_weights = self.fusion(event_feat, imu_feat, range_feat)
+            fused_feat, attention_weights = self.fusion(event_feat, imu_feat, range_feat, consistency_score)
         else:
             fused_feat = torch.cat([event_feat, imu_feat, range_feat], dim=1)
             attention_weights = None
         
-        # Final prediction
-        output = self.regressor(fused_feat)
+        if self.use_physics_aware:
+            # Apply kinematic constraint rectification
+            constrained_feat = self.kinematic_constraint(fused_feat, imu_tensor)
+            # Final prediction
+            output = self.regressor(constrained_feat)
+        else:             
+            # Final prediction
+            output = self.regressor(fused_feat)
         
         return {
             'prediction': output,
             'event_features': event_feat,
             'imu_features': imu_feat,
             'range_features': range_feat,
-            'attention_weights': attention_weights
+            'attention_weights': attention_weights,
+            'kin_loss': kin_loss if self.use_physics_aware else 0
         }
