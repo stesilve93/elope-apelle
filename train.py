@@ -4,7 +4,7 @@ import torch
 from pathlib import Path 
 
 from elope.datasets import ElopeDataLoader
-from elope.models.emmnetVelGruCheat import MultiModalVelocityEstimatorCheat
+from elope.models.emmnetVelGru import MultiModalVelocityEstimator
 from elope.trainers import LunarTrainer
 from elope.utils import LOGGER
 
@@ -14,7 +14,7 @@ from elope.utils import LOGGER
 DATASET_CFG = "cfg/dataset/dataset-5s-stamp-left-norm.yml"
 
 # Path to the yaml file containing the model settings
-MODEL_CFG = "cfg/training/emmnet-v1-elope.yml"
+MODEL_CFG = "cfg/training/emmnet-v2.yml"
 
 
 # Device configuration 
@@ -49,7 +49,7 @@ val_loader = ElopeDataLoader(
 )
 
 # Create the network model 
-model = MultiModalVelocityEstimatorCheat.create_model(
+model = MultiModalVelocityEstimator.create_model(
     MODEL_CFG, 
     device=device, 
 )
@@ -58,7 +58,7 @@ model = MultiModalVelocityEstimatorCheat.create_model(
 trainer = LunarTrainer(MODEL_CFG, model, train_loader, val_loader, device)
 
 # Train the model 
-trainer.train(num_epochs=100, max_patience=30)
+trainer.train(num_epochs=500, max_patience=30)
 
 trainer.plot_training(save_figure=True, figure_name_prefix="./plots/training/training")
 LOGGER.info("Training completed!")
