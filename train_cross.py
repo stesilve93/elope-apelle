@@ -137,4 +137,7 @@ LOGGER.info("Cross-training statistics:")
 table = tabulate(tab_values, headers=tab_headers, tablefmt="fancy_outline")
 print("\n".join(" "*7 + line for line in table.splitlines()))
 
+# Recover all the validation losses
+val_losses = [val[1] for val in tab_values]
+LOGGER.info(f"The model has a mean validation loss of: {np.mean(val_losses)}.") 
 
