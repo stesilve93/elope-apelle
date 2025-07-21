@@ -257,17 +257,17 @@ class ElopeDataset(Dataset):
         if self.rangemeter_noise > 0.0: 
             # Add rangemeter noise on the sequence 
             noise_fct = 2*torch.rand(rangemeter.shape) - 1 
-            rangemeter = rangemeter + self.rangemeter_noise*noise_fct
+            rangemeter = rangemeter*(1 + self.rangemeter_noise*noise_fct)
             
         if self.angles_noise > 0.0: 
             # Add noise on the Euler angles 
             noise_fct = 2*torch.rand(imu_seq[..., 0:3].shape) - 1 
-            imu_seq[..., 0:3] = imu_seq[..., 0:3] + self.angles_noise*noise_fct
+            imu_seq[..., 0:3] = imu_seq[..., 0:3]*(1 + self.angles_noise*noise_fct)
         
         if self.angles_vel_noise > 0.0: 
             # Add noise on the angular velocities 
             noise_fct = 2*torch.rand(imu_seq[..., 3:6].shape) - 1
-            imu_seq[..., 3:6] = imu_seq[..., 3:6] + self.angles_vel_noise*noise_fct
+            imu_seq[..., 3:6] = imu_seq[..., 3:6]*(1 + self.angles_vel_noise*noise_fct)
 
         # TODO: EVENT NOISE???
 
