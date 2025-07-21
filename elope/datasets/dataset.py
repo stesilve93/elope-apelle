@@ -255,7 +255,7 @@ class ElopeDataset(Dataset):
         times      = sample['times'] 
         
         # Normalize the event tensor, if requested 
-        if self.event_normalization: 
+        if self.event_normalization != "null": 
             
             event_clamp = self.cfg_dataset["events"].get("clamp", -1)
             max_val = event_clamp if event_clamp > 0 else None       
