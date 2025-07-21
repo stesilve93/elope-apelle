@@ -185,8 +185,22 @@ class EventProcessor:
         if method == "count": 
             return _events_to_tensor_count(events, time, H, W, T, time_window, side, clamp)
         
+        elif method == "first_timestamp": 
+            return _events_to_tensor_timestamp(events, time, H, W, time_window, side)[0]
+        
         elif method == "last_timestamp": 
+            return _events_to_tensor_timestamp(events, time, H, W, time_window, side)[1]
+        
+        elif method == "timestamp": 
             return _events_to_tensor_timestamp(events, time, H, W, time_window, side)
+        
+        elif method == "hybrid":             
+            
+            # Combine the event counts with the freshness values
+            ev_1 = _events_to_tensor_count(events, time, H, W, 1, time_window, side, clamp)
+            ev_2 = _events_to_tensor_timestamp(events, time, H, W, time_window, side)
+            
+            return torch.vstack((ev_1, ev_2))
         
         else: 
             raise ValueError(f"`{method}` is not a valid event encoding method.")
@@ -314,11 +328,14 @@ def _events_to_tensor_timestamp(
     # Initialize the latest timestamp tensor, with positive events on channel 0 and 
     # negative events on channel 1
     if side == "left": 
-        out_timestamp = np.zeros((H, W, 2))
         t_beg = time - time_window
+        first_timestamp = np.ones((H, W, 2))
+        last_timestamp  = np.zeros((H, W, 2))
+        
     else: 
-        out_timestamp = np.ones((H, W, 2))
         t_beg = time  
+        first_timestamp = np.zeros((H, W, 2))
+        out_timestamp   = np.ones((H, W, 2))
     
     # Filter positive events
     mask_pos = events[:, 2] == 1
@@ -334,11 +351,21 @@ def _events_to_tensor_timestamp(
         x, y, t = pos_x[k], pos_y[k], pos_t[k]
         
         # Update the latest timestamp for this event
-        if side == "left" and out_timestamp[y, x, 0] < t: 
-            out_timestamp[y, x, 0] = t
+        if side == "left":
+            
+            if last_timestamp[y, x, 0] < t: 
+                last_timestamp[y, x, 0] = t
+                
+            if first_timestamp[y, x, 0] > t: 
+                first_timestamp[y, x, 0] = t
              
-        elif side == "right" and out_timestamp[y, x, 0] > t: 
-            out_timestamp[y, x, 0] = t
+        elif side == "right": 
+            
+            if last_timestamp[y, x, 0] > t: 
+                last_timestamp[y, x, 0] = t
+
+            if first_timestamp[y, x, 0] < t: 
+                first_timestamp[y, x, 0] = t
     
     # Filter negative events
     mask_neg = events[:, 2] == 0
@@ -354,19 +381,31 @@ def _events_to_tensor_timestamp(
         x, y, t = neg_x[k], neg_y[k], neg_t[k]
         
         # Update the latest timestamp for this event
-        if side == "left" and out_timestamp[y, x, 1] < t: 
-            out_timestamp[y, x, 1] = t
+        if side == "left":
+            
+            if last_timestamp[y, x, 1] < t: 
+                last_timestamp[y, x, 1] = t
+                
+            if first_timestamp[y, x, 1] > t: 
+                first_timestamp[y, x, 1] = t
              
-        elif side == "right" and out_timestamp[y, x, 1] > t: 
-            out_timestamp[y, x, 1] = t
+        elif side == "right":
+            
+            if last_timestamp[y, x, 1] > t: 
+                last_timestamp[y, x, 1] = t
+
+            if first_timestamp[y, x, 1] < t: 
+                first_timestamp[y, x, 1] = t
          
     if side == "right":
+        
         # Invert the values such that the most recent event is the one closest to the point
-        out_timestamp = 1 - out_timestamp
+        last_timestamp  = 1 - last_timestamp
+        first_timestamp = 1 - first_timestamp
 
         # Invert the polarities 
-        out_timestamp = out_timestamp[:, :, ::-1]
+        last_timestamp  = last_timestamp[:, :, ::-1]
+        first_timestamp = first_timestamp[:, :, ::-1]
     
-    # Add the 1 channel dimension.
-    return np.expand_dims(out_timestamp, axis=0).astype(np.float32)
-    
+    # Stack the two channels 
+    return np.vstack((first_timestamp, last_timestamp)).astype(np.float32)
