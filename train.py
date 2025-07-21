@@ -7,6 +7,7 @@ from elope.datasets import ElopeDataLoader
 from elope.models.emmnetVelGru import MultiModalVelocityEstimator
 from elope.trainers import LunarTrainer
 from elope.utils import LOGGER
+from elope.utils import load_yaml
 
 # Path to the yaml file containing the dataset settings
 # DATASET_CFG = "cfg/dataset/dataset-5s-count-20b.yml"
@@ -14,7 +15,7 @@ from elope.utils import LOGGER
 DATASET_CFG = "cfg/dataset/dataset-5s-stamp-left-norm.yml"
 
 # Path to the yaml file containing the model settings
-MODEL_CFG = "cfg/training/emmnet-v2.yml"
+MODEL_CFG = "cfg/training/emmnet-v2-seq2seq.yml"
 
 
 # Device configuration 
@@ -48,6 +49,16 @@ val_loader = ElopeDataLoader(
     num_workers=4
 )
 
+# Retrieve the model configuration
+if isinstance(MODEL_CFG, (str, Path)): 
+    cfg = load_yaml(MODEL_CFG)
+
+if bool(cfg["seq2seq"]):
+    from elope.models.emmnetVelGru_s2s import MultiModalVelocityEstimator
+else:
+    from elope.models.emmnetVelGru import MultiModalVelocityEstimator
+
+LOGGER.info(f"Model seq2seq: {bool(cfg["seq2seq"])}\n")
 # Create the network model 
 model = MultiModalVelocityEstimator.create_model(
     MODEL_CFG, 
