@@ -10,7 +10,14 @@ from tabulate import tabulate
 from elope.datasets import ElopeDataLoader, SequenceLoader, EventProcessor
 from elope.models.emmnetVelGru import MultiModalVelocityEstimator
 from elope.trainers import LunarTrainer
-from elope.utils import LOGGER, load_yaml, gridminor, increment_path
+from elope.utils import (
+    LOGGER, 
+    gridminor, 
+    increment_path,
+    load_yaml, 
+    compute_posz, 
+    compute_posvelz,
+)
 
 # Path to the yaml file containing the dataset settings
 DATASET_CFG = "cfg/dataset/dataset-5s-stamp-left-1us.yml"
@@ -23,6 +30,9 @@ WEIGHTS_PATH = Path("weights") / "elope-emmnet-v1-elope_20250719_201517-0180" / 
 
 # True if the plots of the predictions / groundtruth should be saved for each test traj.
 SAVE_PLOTS = True
+
+# True if the output of the z-velocity should be taken from the geometry constraint
+OUTPUT_ANALYTICAL_VZ = True 
 
 # Device configuration 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -92,6 +102,7 @@ for seq_id in seq_train:
     
     # Initialize the arrays for the results
     predictions, targets, times = [], [], []
+    rangemeters, angles = [], []
     for k in range(idx_beg, seq_loader.seq_len): 
         
         # Retrieve the data at the current time
@@ -101,18 +112,18 @@ for seq_id in seq_train:
         events    = data_k['events_tensor'].unsqueeze(0).to(device)
         imu_seq   = data_k['imu_sequence'].unsqueeze(0).to(device)
         range_seq = data_k['rangemeter_sequence'].unsqueeze(0).to(device)
-        states   = data_k['ground_truth'].unsqueeze(0).to(device)
+        states    = data_k['ground_truth'].unsqueeze(0).to(device)
         
         # Check whether events should be normalized
         if event_normalization != "null":         
-            for k in range(events.shape[0]): 
+            for i in range(events.shape[0]): 
     
                 # Normalize the event tensor
                 event_clamp = seq_loader.event_clamp
                 max_val = event_clamp if event_clamp > 0 else None       
                 
-                events[k] = EventProcessor.normalize_tensor(
-                    events[k], method=event_normalization, max_val=max_val
+                events[i] = EventProcessor.normalize_tensor(
+                    events[i], method=event_normalization, max_val=max_val
                 )
         
         if not model_cfg["seq2seq"]: 
@@ -128,10 +139,28 @@ for seq_id in seq_train:
         times.append(seq_loader.timestamps_full[k])
         targets.append(states.cpu().numpy().squeeze())
         predictions.append(pred_k.cpu().numpy().squeeze())
-    
+        
+        # Store additional values 
+        rangemeters.append(range_seq.cpu().numpy().squeeze()[-1])
+        angles.append(imu_seq.cpu().numpy().squeeze()[-1, :3])
+            
     predictions = np.array(predictions)
     targets = np.array(targets)
     times = np.array(times)
+    
+    angles = np.array(angles)
+    rangemeters = np.array(rangemeters)
+        
+    if OUTPUT_ANALYTICAL_VZ: 
+        
+        # Replace the output velocity on the Z-direction with the one from the 
+        # geometrical constraints 
+        pos_z, vel_z = compute_posvelz(
+            times, rangemeters, angles, fp_window_length=30, fv_window_length=30
+        )
+        
+        # Replace the network output with our data
+        predictions[:, -1] = vel_z
     
     # Compute the test metrics
     test_metrics = LunarTrainer.compute_metrics(
