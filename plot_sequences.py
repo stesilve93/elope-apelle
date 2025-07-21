@@ -9,13 +9,13 @@ from elope.datasets import SequenceLoader
 from elope.utils import LOGGER, load_yaml, gridminor, getfiles
 
 # Path to the yaml file containing the dataset settings
-DATASET_CFG = "cfg/dataset/dataset-5s-count-1b.yml"
+DATASET_CFG = "cfg/dataset/dataset-5s-stamp-left-1us.yml"
 
 # Path to the yaml file containing the model settings
-MODEL_CFG = "cfg/training/emmnet-v1-mse-rel.yml"
+MODEL_CFG = "cfg/training/emmnet-v2.yml"
 
 # Path to PyTorch's weight file
-WEIGHTS_PATH = Path("weights") / "elope-emmnet-v1-elope_20250719_123610" / "best.pth"
+WEIGHTS_PATH = Path("weights") / "elope-emmnet-v1_20250721_153257" / "best.pth"
 
 # Path to the folder in which to store the plots
 PLOT_PATH = Path("plots") / "sequences"
@@ -40,7 +40,7 @@ for mode in modes:
         event_encoder_method=events_cfg["encoder_method"],
         event_H=events_cfg["height"],
         event_W=events_cfg["width"],
-        event_T=5, 
+        event_T=1, 
         imu_seq_len=dataset_cfg["imu_sequence_length"], 
         imu_padding=dataset_cfg["imu_padding"]
     )
