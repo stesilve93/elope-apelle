@@ -81,6 +81,10 @@ SAVE_NAME = cfg_weights["name"] + f"_{timestamp}"
 SAVE_PATH = increment_path(Path(cfg_weights["path"]) / SAVE_NAME, exist_ok=False)
 SAVE_PATH.mkdir(parents=True)
 
+# Generate the path for the plots 
+PLOT_PATH = Path("plots") / "training"
+PLOT_PATH.mkdir(parents=True)
+
 LOGGER.info(f"Saving training output to {SAVE_PATH} directory.")
 
 # Copy inside the folder the configuration yamls for the dataset and the model 
@@ -89,6 +93,6 @@ shutil.copy(MODEL_CFG, SAVE_PATH / "model-cfg.yml")
 
 # Train the model 
 trainer.train(num_epochs=500, max_patience=30, save_path=SAVE_PATH)
+trainer.plot_training(save_figure=True, path=PLOT_PATH, filename=f"training_{timestamp}")
 
-trainer.plot_training(save_figure=True, figure_name_prefix="./plots/training/training")
 LOGGER.info("Training completed!")

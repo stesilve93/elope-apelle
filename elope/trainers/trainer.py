@@ -378,7 +378,9 @@ class LunarTrainer:
                 LOGGER.warning("Early stopping triggered. No improvement for 10 epochs.")
                 break
 
-    def plot_training(self, save_figure=False, figure_name_prefix="training_plot"):
+    def plot_training(
+        self, save_figure=False, path: str | Path="/plots/training/", filename: str=None
+    ):
         """
         Plots the training and validation losses over epochs.
         Args:
@@ -410,8 +412,10 @@ class LunarTrainer:
             # Get current timestamp
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             
-            # Ensure the 
-            outpath = Path(f"{figure_name_prefix}_{timestamp}.png")
+            if filename is None: 
+                filename = f"training_{timestamp}.png"
+            
+            outpath = Path(path) / filename
             if not outpath.parent.exists(): 
                 # Ensure the output directory exists
                 outpath.parent.mkdir(parents=True)
