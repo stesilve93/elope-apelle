@@ -1,4 +1,7 @@
 
+import datetime 
+import shutil
+
 import torch 
 
 from pathlib import Path 
@@ -6,7 +9,7 @@ from pathlib import Path
 from elope.datasets import ElopeDataLoader
 from elope.models.emmnetVelGru import MultiModalVelocityEstimator
 from elope.trainers import LunarTrainer
-from elope.utils import LOGGER, load_yaml
+from elope.utils import LOGGER, load_yaml, increment_path
 
 
 # Path to the yaml file containing the dataset settings
@@ -51,28 +54,41 @@ val_loader = ElopeDataLoader(
     num_workers=4
 )
 
-# Retrieve the model configuration
-if isinstance(MODEL_CFG, (str, Path)): 
-    cfg = load_yaml(MODEL_CFG)
-
-if bool(cfg["seq2seq"]):
+if bool(model_cfg["seq2seq"]):
     from elope.models.emmnetVelGru_s2s import MultiModalVelocityEstimator
 else:
     from elope.models.emmnetVelGru import MultiModalVelocityEstimator
 
-LOGGER.info("Model seq2seq: %s", cfg["seq2seq"])
+LOGGER.info("Model seq2seq: %s", model_cfg["seq2seq"])
+
 # Create the network model 
 model = MultiModalVelocityEstimator.create_model(
     MODEL_CFG, 
     device=device, 
 )
 
-
 # Create the trainer for the model 
 trainer = LunarTrainer(MODEL_CFG, model, train_loader, val_loader, device)
 
+# Create the folder in which to store the model data 
+cfg_weights = model_cfg("weights")
+
+# Get current timestamp
+timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+# Generates the folder in which to store the data
+SAVE_NAME = cfg_weights["name"] + f"_{timestamp}"
+SAVE_PATH = increment_path(Path(cfg_weights["path"]) / SAVE_NAME, exist_ok=False)
+SAVE_PATH.mdkir(parents=True)
+
+LOGGER.info(f"Saving training output to {SAVE_PATH} directory.")
+
+# Copy inside the folder the configuration yamls for the dataset and the model 
+shutil.copy(DATASET_CFG, SAVE_PATH / "dataset-cfg.yml")
+shutil.copy(MODEL_CFG, SAVE_PATH / "model-cfg.yml")
+
 # Train the model 
-trainer.train(num_epochs=500, max_patience=30)
+trainer.train(num_epochs=500, max_patience=30, save_path=SAVE_PATH)
 
 trainer.plot_training(save_figure=True, figure_name_prefix="./plots/training/training")
 LOGGER.info("Training completed!")
