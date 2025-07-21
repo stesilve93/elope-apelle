@@ -11,4 +11,4 @@ from .misc import (
 
 from .logger import LOGGER
 
-from ..trainers.losses import loss_elope
+from .plots import gridminor

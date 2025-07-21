@@ -27,7 +27,8 @@ class LunarTrainer:
         model: nn.Module, 
         train_loader: ElopeDataLoader, 
         val_loader: ElopeDataLoader=None, 
-        device: str ='cuda'
+        device: str ='cuda',
+        val_metric: str="elope_score"
     ):
         
         # Retrieve the model configuration
@@ -45,6 +46,9 @@ class LunarTrainer:
         # Store the validation and training dataset loaders
         self.train_loader = train_loader
         self.val_loader = val_loader
+        
+        # Store the name of the metric used to identify the best model 
+        self.val_metric_key = val_metric
         
         # Check whether the model is sequence to sequence.
         self.seq2seq = bool(self.cfg["seq2seq"])
@@ -78,13 +82,26 @@ class LunarTrainer:
         # Retrieve the predicted velocities
         vel_pred = predictions[:, 0:3] if self.velocity_only else predictions[:, 3:6]
         
+        # Assemble the global loss function
+        total_loss = torch.tensor(0.0, requires_grad=True).to(targets)
+         
+        # Initialize the loss functions
+        l_mse_abs = torch.tensor(0.0, requires_grad=True).to(targets) 
+        l_mse_rel = torch.tensor(0.0, requires_grad=True).to(targets)
+        l_elope   = torch.tensor(0.0, requires_grad=True).to(targets)
+         
         # Compute the different losses
-        l_mse_abs = self.lmb_mse_abs*loss_mse_abs(vel_pred, vel_target)
-        l_mse_rel = self.lmb_mse_rel*loss_mse_rel(vel_pred, vel_target)
-        l_elope   = self.lmb_elope*loss_elope(vel_pred, vel_target, pos_target)
+        if self.lmb_mse_abs != 0: 
+            l_mse_abs = self.lmb_mse_abs*loss_mse_abs(vel_pred, vel_target)
+            total_loss += l_mse_abs
+            
+        if self.lmb_mse_rel != 0: 
+            l_mse_rel = self.lmb_mse_rel*loss_mse_rel(vel_pred, vel_target)
+            total_loss += l_mse_rel
         
-        # Compute the global loss function
-        total_loss  = l_elope + l_mse_abs + l_mse_rel
+        if self.lmb_elope != 0: 
+            l_elope = self.lmb_elope*loss_elope(vel_pred, vel_target, pos_target)
+            total_loss += l_elope
         
         loss = {
             'vel_mse_abs_loss': l_mse_abs, 
@@ -154,7 +171,7 @@ class LunarTrainer:
         # Create the bar to display current iterations
         tbar = tqdm.tqdm(
             self.train_loader, desc=f"       Epoch {epoch:02d}/{num_epochs:02d}", unit="i", 
-            ncols=90, miniters=5
+            ncols=120, miniters=5
         )
         
         for i, (events, imu, rangemeter, targets, times) in enumerate(tbar):
@@ -164,6 +181,10 @@ class LunarTrainer:
             rangemeter = rangemeter.to(self.device)
             events = events.to(self.device)
             imu = imu.to(self.device)
+            
+            if not self.seq2seq: 
+                # Keep only the events closest to the state to be predicted
+                events = events[:, -1]
             
             self.optimizer.zero_grad()
             
@@ -178,6 +199,7 @@ class LunarTrainer:
             #loss = loss_dict['total_loss'] + outputs['kin_loss'] if 'kin_loss' in outputs else 0
 
             # Backward pass
+            # with torch.autograd.detect_anomaly():
             loss.backward()
             
             # Gradient clipping for stability
@@ -228,6 +250,10 @@ class LunarTrainer:
                 rangemeter = rangemeter.to(self.device)
                 events = events.to(self.device)
                 imu = imu.to(self.device)
+                
+                if not self.seq2seq: 
+                    # Keep only the events closest to the state to be predicted
+                    events = events[:, -1]
                 
                 # Run inference
                 outputs = self.model(events, imu, rangemeter)
@@ -300,11 +326,11 @@ class LunarTrainer:
             val_metrics = self.validate()
             if val_metrics:
                 self.val_losses.append(val_metrics['total_loss'])
-                val_loss = val_metrics['total_loss']
+                val_loss = val_metrics[self.val_metric_key]
                 loss_metrics = val_metrics
             
             else:
-                val_loss = train_metrics['total_loss']
+                val_loss = train_metrics[self.val_metric_key]
                 loss_metrics = train_metrics
             
             # Learning rate scheduling
@@ -314,8 +340,8 @@ class LunarTrainer:
             if (epoch % ckp_epochs) == 0:
                 torch.save(self.model.state_dict(), save_path_model / f"{epoch}.pth")
                 print(
-                    " "*6, f"Model weights saved! Val. Loss: {val_loss:.4f} / ", 
-                    f"Train Loss: {train_metrics['total_loss']:.4f}"
+                    " "*6, f"Model weights saved! Val. Metric ({self.val_metric_key}): " 
+                    f"{val_loss:.4f} / Train Loss: {train_metrics['total_loss']:.4f}"
                 )
                 
             # Save best model
@@ -323,8 +349,8 @@ class LunarTrainer:
                 self.best_val_loss = val_loss
                 torch.save(self.model.state_dict(), save_path_model / "best.pth")
                 print(
-                    " "*6, f"New best model saved! Val. Loss: {val_loss:.4f} /", 
-                    f"Train Loss: {train_metrics['total_loss']:.4f}"
+                    " "*6, f"New best model saved! Val. Metric ({self.val_metric_key}): "
+                    f"{val_loss:.4f} / Train Loss: {train_metrics['total_loss']:.4f}"
                 )
                 
                 patience_counter = 0

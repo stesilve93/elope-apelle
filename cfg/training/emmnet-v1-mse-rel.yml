@@ -5,10 +5,10 @@ weights:
   path: weights
 
   # Name of the model
-  name: elope-emmnet-v1
+  name: elope-emmnet-v1-mse-rel
 
   # Specify every how many epochs the model weights should be saved.
-  checkpoint_epochs: 2
+  checkpoint_epochs: 5
 
 # True if the network should only provide the velocity as an input
 velocity_only: True
@@ -33,7 +33,7 @@ losses:
   lmb_mse_abs: 0.0 
 
   # Weight for the loss using relative MSE
-  lmb_mse_rel: 0.0 
+  lmb_mse_rel: 1.0 
 
   # Weight for the ELOPE loss
-  lmb_elope: 1.0
+  lmb_elope: 0.0

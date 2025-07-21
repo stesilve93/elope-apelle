@@ -1,6 +1,7 @@
 
 import numpy as np 
 
+from numba import njit
 
 class EventProcessor:
     """Process event camera data for optical flow estimation"""
@@ -159,161 +160,36 @@ class EventProcessor:
                 
         return frame
     
-    @staticmethod
+    @staticmethod 
     def events_to_tensor(
         events: np.ndarray, 
-        H: int = 200, 
-        W: int = 200, 
-        T: int = 10,
-        method: str = 'count',
-        end_time: float = 0,
-        time_window: float = 1e5
-    ) -> np.ndarray:
-        """
-        Convert event stream to 4D tensor representation
+        time: float, 
+        H: int=200, 
+        W: int=200, 
+        T: int=10, 
+        method: str="count", 
+        time_window: float=1e5, 
+        side: str="left",
+        clamp: int=10,
+    ) -> np.ndarray: 
+        # DOCME: Time must be expressed in microseconds!!
         
-        Args:
-            events: Array with columns [x, y, p, t]
-            H, W: Spatial dimensions
-            T: Number of time bins
-            method: 'count' or 'time_surface'
-            
-        Returns:
-            if method is 'count':
-                4D tensor of shape (T, H, W, 2) - [time, height, width, polarity]
-                The tensor values represent the count of events at each location and time bin, separated by polarity.
-            if method is 'last_timestamp':
-                4D Tensor Structure: (2, H, W, 2)
-
-                Dimension 0 - Feature Type (2 channels):
-
-                [0, :, :, :] → Normalized timestamps (0-1, where 1 = most recent)
-                [1, :, :, :] → Freshness values (0-1, where 1 = just happened)
-
-                Dimensions 1-2 - Spatial:
-
-                H × W → Height and Width of the sensor
-
-                Dimension 3 - Polarity (2 channels):
-
-                [:, :, :, 0] → Positive events
-                [:, :, :, 1] → Negative events
-        """
-        if method == 'count':
-            if len(events) == 0:
-                return np.zeros((T, H, W, 2), dtype=np.float32)
-                
-            # Create time bins
-            t_min, t_max = events[:, 3].min(), events[:, 3].max()
-            t_bins = np.linspace(t_min, t_max, T + 1)
-            
-            tensor = np.zeros((T, H, W, 2), dtype=np.float32)
-            
-            for i in range(T):
-                # Find events in this time bin
-                mask = (events[:, 3] >= t_bins[i]) & (events[:, 3] < t_bins[i + 1])
-                if i == T - 1:  # Include last timestamp
-                    mask = (events[:, 3] >= t_bins[i]) & (events[:, 3] <= t_bins[i + 1])
-                
-                bin_events = events[mask]
-                
-                if len(bin_events) > 0:
-                    # Separate by polarity
-                    pos_events = bin_events[bin_events[:, 2] == 1]  # True polarity
-                    neg_events = bin_events[bin_events[:, 2] == 0]  # False polarity
-                    
-                    # Accumulate positive events
-                    if len(pos_events) > 0:
-                        x_pos, y_pos = pos_events[:, 0].astype(int), pos_events[:, 1].astype(int)
-                        # Ensure coordinates are within bounds
-                        valid_pos = (x_pos >= 0) & (x_pos < W) & (y_pos >= 0) & (y_pos < H)
-                        if np.any(valid_pos):
-                            np.add.at(tensor[i, :, :, 0], (y_pos[valid_pos], x_pos[valid_pos]), 1)
-                    
-                    # Accumulate negative events
-                    if len(neg_events) > 0:
-                        x_neg, y_neg = neg_events[:, 0].astype(int), neg_events[:, 1].astype(int)
-                        valid_neg = (x_neg >= 0) & (x_neg < W) & (y_neg >= 0) & (y_neg < H)
-                        if np.any(valid_neg):
-                            np.add.at(tensor[i, :, :, 1], (y_neg[valid_neg], x_neg[valid_neg]), 1)
-                    
-        elif method=='last_timestamp':
-            # Initialize timestamp tensors
-            # Channel 0: positive events, Channel 1: negative events
-            last_timestamp_tensor = np.zeros((2, H, W), dtype=np.float64)
-            freshness_tensor = np.zeros((2, H, W), dtype=np.float32)
-            
-            # Extract coordinates, polarities, and timestamps
-            x_coords = events[:, 0].astype(int)
-            y_coords = events[:, 1].astype(int)
-            polarities = events[:, 2].astype(int)
-            timestamps = events[:, 3]
-            
-            # Clip coordinates to tensor boundaries
-            x_coords = np.clip(x_coords, 0, W-1)  
-            y_coords = np.clip(y_coords, 0, H-1)
-            
-            # Convert polarities: 1 for positive, 0 for negative (or -1 for negative)
-            # Adjust this based on the data format
-            pos_mask = polarities > 0
-            neg_mask = polarities <= 0
-            
-            # For each pixel, find the last (most recent) timestamp for each polarity
-            for i in range(len(events)):
-                x, y, pol, t = x_coords[i], y_coords[i], polarities[i], timestamps[i]
-                
-                if pol > 0:  # Positive event
-                    # Update if this timestamp is more recent
-                    if last_timestamp_tensor[0, y, x] < t:
-                        last_timestamp_tensor[0, y, x] = t
-                else:  # Negative event  
-                    if last_timestamp_tensor[1, y, x] < t:
-                        last_timestamp_tensor[1, y, x] = t
-            
-            # Normalize timestamps to [0, 1] range relative to the time window
-            # More recent events will have values closer to 1
-            t_min = end_time - time_window
-            t_max = end_time
-            
-            # Avoid division by zero
-            if time_window > 0:
-                # Normalize: (timestamp - t_min) / time_window
-                # Pixels with no events will remain 0
-                pos_mask = last_timestamp_tensor[0] > 0
-                neg_mask = last_timestamp_tensor[1] > 0
-                
-                normalized_timestamps = np.zeros_like(last_timestamp_tensor, dtype=np.float32)
-                
-                if np.any(pos_mask):
-                    normalized_timestamps[0][pos_mask] = (last_timestamp_tensor[0][pos_mask] - t_min) / time_window
-                if np.any(neg_mask):
-                    normalized_timestamps[1][neg_mask] = (last_timestamp_tensor[1][neg_mask] - t_min) / time_window
-                
-                # Calculate freshness (how recent the event is)
-                # 1.0 = just happened, 0.0 = oldest in window, 0.0 = no event
-                freshness_tensor[0][pos_mask] = (last_timestamp_tensor[0][pos_mask] - t_min) / time_window
-                freshness_tensor[1][neg_mask] = (last_timestamp_tensor[1][neg_mask] - t_min) / time_window
-            else:
-                normalized_timestamps = last_timestamp_tensor.astype(np.float32)
-            
-            # Organize as 4D tensor: (polarity, feature_type, H, W)
-            # Polarity: 0=positive events, 1=negative events  
-            # Feature type: 0=normalized_timestamp, 1=freshness
-            tensor = np.zeros((2, H, W, 2), dtype=np.float32)
-            
-            # Positive events
-            tensor[0, :, :, 0] = normalized_timestamps[0]  # Normalized timestamp
-            tensor[1, :, :,0] = freshness_tensor[0]       # Freshness
-            
-            # Negative events  
-            tensor[0, :, :, 1] = normalized_timestamps[1]  # Normalized timestamp
-            tensor[1, :, :, 1] = freshness_tensor[1]       # Freshness
-            
-        return tensor
-
+        # Ensure the size of the time-window is greater than 0
+        assert time_window > 0
+    
+        if method == "count": 
+            return _events_to_tensor_count(events, time, H, W, T, time_window, side, clamp)
         
+        elif method == "last_timestamp": 
+            return _events_to_tensor_timestamp(events, time, H, W, time_window, side)
+        
+        else: 
+            raise ValueError(f"`{method}` is not a valid event encoding method.")
+
     @staticmethod
-    def normalize_tensor(tensor: np.ndarray, method: str = 'standard') -> np.ndarray:
+    def normalize_tensor(
+        tensor: np.ndarray, method: str='standard', min_val: float=None, max_val: float=None
+    ) -> np.ndarray:
         """Normalize event tensor"""
         
         if method == 'standard':
@@ -325,8 +201,168 @@ class EventProcessor:
                 
         elif method == 'minmax':
             # Min-max normalization
-            min_val, max_val = tensor.min(), tensor.max()
+            min_val = min_val if min_val is not None else tensor.min() 
+            max_val = max_val if max_val is not None else tensor.max() 
+
             if max_val > min_val:
                 tensor = (tensor - min_val) / (max_val - min_val)
+                
+        else: 
+            raise ValueError(f"`{method}` is an unsupported normalization method.")
         
         return tensor.astype(np.float32)
+
+
+def _events_to_tensor_count(
+    events: np.ndarray, time: float, H: int, W: int, T: int, time_window: float, side: str, 
+    clamp: int
+) -> np.ndarray: 
+    
+    # events is an array of size (n, 4) with (x, y, p, t)
+    
+    # Create the event tensor
+    tensor = np.zeros((T, H, W, 2), dtype=np.float32)
+    if len(events) == 0: 
+        return tensor
+    
+    # Compute the size of a time-bin. This way the size of each bin is fixed for a given 
+    # integration window, regardless of how many events are incoming.
+    dt = time_window/T 
+    
+    if side == "left": 
+        t_min = time - time_window
+        t_max = time
+    
+    else: 
+        t_min = time 
+        t_max = time + time_window
+    
+    for i in range(T): 
+        
+        if side == "left": 
+            # Compute the bin edges
+            t_beg = t_min + i*dt
+            t_end = t_beg + dt
+            
+            # Filter the events within the bin
+            mask_bin  = events[:, 3] >= t_beg 
+            mask_bin &= events[:, 3] < t_end if i < T - 1 else events[:, 3] <= t_end
+
+        else: 
+            # Compute the bin edges
+            t_beg = t_max - i*dt
+            t_end = t_beg - dt
+            
+            # Filter the events within the bin
+            mask_bin  = events[:, 3] <= t_beg 
+            mask_bin &= events[:, 3] > t_end if i < T - 1 else events[:, 3] >= t_end
+             
+        # Retrieve the events in the current time bin
+        events_bin = events[mask_bin]
+        
+        if len(events_bin) == 0: 
+            # There are no events to be added in this time-bin
+            continue 
+        
+        # Separate the events by polarity (true and false)
+        events_pos = events_bin[events_bin[:, 2] == 1]
+        events_neg = events_bin[events_bin[:, 2] == 0]
+        
+        # Accumulate the positive events 
+        if len(events_pos) > 0: 
+            # Retrieve the events coordinates
+            x_pos = events_pos[:, 0].astype(np.int64)
+            y_pos = events_pos[:, 1].astype(np.int64)
+
+            # Ensure the coordinates are within the bounds 
+            mask_pos = (x_pos >= 0) & (x_pos < W) & (y_pos >= 0) & (y_pos < H)
+            if np.any(mask_pos): 
+                # Add one event at the position identified by these coordinates
+                np.add.at(tensor[i, :, :, 0], (y_pos[mask_pos], x_pos[mask_pos]), 1)
+        
+        # Accumulate the negative events 
+        if len(events_neg) > 0: 
+            # Retrieve the events coordinates
+            x_neg = events_neg[:, 0].astype(np.int64)
+            y_neg = events_neg[:, 1].astype(np.int64)
+            
+            # Ensure the coordinates are within the bounds 
+            mask_neg = (x_neg >= 0) & (x_neg < W) & (y_neg >= 0) & (y_neg < H)
+            if np.any(mask_neg): 
+                # Add one event at the position identified by these coordinates
+                np.add.at(tensor[i, :, :, 1], (y_neg[mask_neg], x_neg[mask_neg]), 1)
+    
+    if side == "right": 
+        # Invert the polarity of the events if we are looking backwards 
+        tensor = tensor[:, :, :, ::-1]
+    
+    if clamp > 0:
+        # Clamp the maximum values within each bin.
+        tensor = np.clip(tensor, 0, clamp)
+         
+    return tensor     
+    
+@njit(cache=True)
+def _events_to_tensor_timestamp(
+    events: np.ndarray, time: float, H: int, W: int, time_window: float, side: str
+) -> np.ndarray:
+    
+    # Initialize the latest timestamp tensor, with positive events on channel 0 and 
+    # negative events on channel 1
+    if side == "left": 
+        out_timestamp = np.zeros((H, W, 2))
+        t_beg = time - time_window
+    else: 
+        out_timestamp = np.ones((H, W, 2))
+        t_beg = time  
+    
+    # Filter positive events
+    mask_pos = events[:, 2] == 1
+    
+    # Convert positive coordinates and normalize times
+    pos_x = np.clip(events[mask_pos, 0].astype(np.int64), 0, W-1)
+    pos_y = np.clip(events[mask_pos, 1].astype(np.int64), 0, H-1)
+    pos_t = (events[mask_pos, 3] - t_beg)/time_window
+    
+    # Parse positive events
+    for k in range(len(pos_x)): 
+        # Retrieve event position and time
+        x, y, t = pos_x[k], pos_y[k], pos_t[k]
+        
+        # Update the latest timestamp for this event
+        if side == "left" and out_timestamp[y, x, 0] < t: 
+            out_timestamp[y, x, 0] = t
+             
+        elif side == "right" and out_timestamp[y, x, 0] > t: 
+            out_timestamp[y, x, 0] = t
+    
+    # Filter negative events
+    mask_neg = events[:, 2] == 0
+    
+    # Convert negative coordinates and normalize times
+    neg_x = np.clip(events[mask_neg, 0].astype(np.int64), 0, W-1)
+    neg_y = np.clip(events[mask_neg, 1].astype(np.int64), 0, H-1)
+    neg_t = (events[mask_neg, 3] - t_beg)/time_window
+    
+    # Parse negative events 
+    for k in range(len(neg_x)): 
+        # Retrieve event position and time
+        x, y, t = neg_x[k], neg_y[k], neg_t[k]
+        
+        # Update the latest timestamp for this event
+        if side == "left" and out_timestamp[y, x, 1] < t: 
+            out_timestamp[y, x, 1] = t
+             
+        elif side == "right" and out_timestamp[y, x, 1] > t: 
+            out_timestamp[y, x, 1] = t
+         
+    if side == "right":
+        # Invert the values such that the most recent event is the one closest to the point
+        out_timestamp = 1 - out_timestamp
+
+        # Invert the polarities 
+        out_timestamp = out_timestamp[:, :, ::-1]
+    
+    # Add the 1 channel dimension.
+    return np.expand_dims(out_timestamp, axis=0).astype(np.float32)
+    

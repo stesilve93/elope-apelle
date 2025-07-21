@@ -25,8 +25,14 @@ def loss_mse_abs(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
 def loss_mse_rel(pred: torch.Tensor, target: torch.Tensor) -> torch.tensor: 
     # DOCME
     
-    err_vel_rel = ((pred - target)/target)**2
-    return torch.sum(err_vel_rel)/target.numel()
+    # Prevent divsion by zero.
+    eps = 1e-6
+    
+    # Mask very small values to prevent numerical instability
+    mask = target != 0.0 
+    
+    err_vel_rel = ((pred[mask] - target[mask])/target[mask] + eps)**2
+    return torch.sum(err_vel_rel)/target[mask].numel()
 
     
 def loss_elope(

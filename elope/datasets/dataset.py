@@ -24,7 +24,9 @@ class ElopeDataset(Dataset):
         'use_cached': False, 
     }
     
-    KEYS_DATASET = ["sample_interval", "imu_sequence_length", "imu_padding", "events"]
+    KEYS_DATASET = [
+        "sample_interval", "imu_sequence_length", "imu_padding", "events", "side"
+    ]
     
     def __init__(
         self, cfg: dict | str | Path, sequence_ids: list, **kwargs
@@ -51,9 +53,11 @@ class ElopeDataset(Dataset):
             cfg["datapath"], 
             event_integration_window=cfg_events["integration_window"],
             event_encoder_method=cfg_events["encoder_method"],
+            event_normalization=cfg_events["normalization"],
+            event_clamp=cfg_events.get("clamp", -1),
             event_H=cfg_events["height"],
             event_W=cfg_events["width"],
-            event_T=cfg_events["time_bins"], 
+            event_T=cfg_events.get("channels", 1), 
             imu_seq_len=self.cfg_dataset["imu_sequence_length"], 
             imu_padding=self.cfg_dataset["imu_padding"]
         )
@@ -197,16 +201,37 @@ class ElopeDataset(Dataset):
         seq_len = len(self.seq_loader.timestamps_full)
         if seq_len == 0:  
             return []
-        
+            
         # Retrieve the sequence sampling interval 
         sample_interval = int(self.cfg_dataset["sample_interval"])
         
-        # Iterate over the entire trajectory and collect samples
+        # Get the directions from which to create the dataset
+        cfg_side = self.cfg_dataset["side"]
+        if cfg_side in ("left", "right"): 
+            sides = [cfg_side]
+        elif cfg_side == "both": 
+            sides = ["left", "right"]
+        else: 
+            raise ValueError(f"`{cfg_side}` is not a supported side value.")
+        
         subsamples = []
-        for i in range(0, seq_len, sample_interval):
-            data_i = self.seq_loader.get_data_at_time(self.seq_loader.timestamps_full[i])
-            if data_i: 
-                subsamples.append(data_i) 
+        for side in sides: 
+            
+            # Check whether we should flip the data 
+            flip = side == "right"
+            
+            # Pre-load the sequence events
+            self.seq_loader.preprocess_events(side=side)
+            
+            # Iterate over the entire trajectory and collect samples 
+            for k in range(0, seq_len, sample_interval): 
+                # Retrieve the data points at this time
+                data_k = self.seq_loader.get_data_at_time(
+                    self.seq_loader.timestamps_full[k], flip=flip
+                )
+                
+                if data_k: 
+                    subsamples.append(data_k)
 
         return subsamples
     
@@ -220,10 +245,10 @@ class ElopeDataset(Dataset):
         
         # Retrieve the different sequences 
         events     = sample['events_tensor']
-        imu_seq    = sample['imu_sequence']
-        rangemeter = sample['rangemeter_sequence']
+        imu_seq    = sample['imu_sequence'].clone()
+        rangemeter = sample['rangemeter_sequence'].clone()
         targets    = sample['ground_truth']
-        times      = sample['time'] 
+        times      = sample['times'] 
         
         if not self.augment: 
             # No augmentation is performed
@@ -232,40 +257,18 @@ class ElopeDataset(Dataset):
         if self.rangemeter_noise > 0.0: 
             # Add rangemeter noise on the sequence 
             noise_fct = 2*torch.rand(rangemeter.shape) - 1 
-            rangemeter = rangemeter + self.rangemeter_noise*noise_fct
+            rangemeter = rangemeter*(1 + self.rangemeter_noise*noise_fct)
             
         if self.angles_noise > 0.0: 
             # Add noise on the Euler angles 
             noise_fct = 2*torch.rand(imu_seq[..., 0:3].shape) - 1 
-            imu_seq[..., 0:3] = imu_seq[..., 0:3] + self.angles_noise*noise_fct
+            imu_seq[..., 0:3] = imu_seq[..., 0:3]*(1 + self.angles_noise*noise_fct)
         
         if self.angles_vel_noise > 0.0: 
             # Add noise on the angular velocities 
             noise_fct = 2*torch.rand(imu_seq[..., 3:6].shape) - 1
-            imu_seq[..., 3:6] = imu_seq[..., 3:6] + self.angles_vel_noise*noise_fct
-        
-        # # Flip the trajectory 
-        # if random.random() < cfg_aug["flip"]: 
-        #     # Flip the lander velocity
-        #     targets[3:6] = -targets[3:6]
-        #     # Flip the IMU euler angle velocity 
-        #     imu_seq[..., 3:6] = -imu_seq[..., 3:6]
-        #     # Flip the rangemeter data 
-        #     rangemeter = rangemeter.flip(0)
-        #     # Flip the events polarity 
-        #     events = events.flip(0)
-        #     # TODO: we should change the event timings too 
-    
-        # # Rangemeter noise
-        # print(events.shape)
-        # print(imu_seq.shape)
-        # print(rangemeter, rangemeter.shape) 
-        # print(targets[3:6], targets.shape)
-        # print(times, times.shape)
-        
-        # Types of augmentation 
-        # 1) FLIP 
-        # 4) EVENT NOISE 
-        # raise RuntimeError
-        
+            imu_seq[..., 3:6] = imu_seq[..., 3:6]*(1 + self.angles_vel_noise*noise_fct)
+
+        # TODO: EVENT NOISE???
+
         return events, imu_seq, rangemeter, targets, times
