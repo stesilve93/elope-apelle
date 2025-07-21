@@ -6,7 +6,7 @@ import torch
 
 from pathlib import Path
 
-from elope.datasets import SequenceLoader, EventProcessor
+from elope.datasets import SequenceLoader, ElopeDataset, EventProcessor
 from elope.models.emmnetVelGru import MultiModalVelocityEstimator
 from elope.utils import (
     LOGGER, 
@@ -17,15 +17,18 @@ from elope.utils import (
     compute_posz, 
     compute_posvelz
 )
+
+# Name of the submission file 
+SUBMISSION_NAME = "elope-emmnet-v1-elope_20250719_201517-0180"
     
 # Name of the file in which the weights are stored
-WEIGHTS_PATH = Path("weights") / "elope-emmnet-v1_20250717_164721" / "best.pt"
+WEIGHTS_PATH = Path("weights") / "elope-emmnet-v1-elope_20250719_201517-0180" / "best.pth"
 
 # Path to the file containing the trained dataset
-CFG_PATH_DATASET = "cfg/dataset/rng-5s.yml"
+CFG_PATH_DATASET = "cfg/dataset/dataset-5s-stamp-left-1us.yml"
 
 # Path to the yaml file containing the dataset settings
-CFG_PATH_MODEL = "cfg/training/emmnet-v1.yml"
+CFG_PATH_MODEL = "cfg/training/emmnet-v1-elope.yml"
 
 # Path in which the sequence data is stored
 DATAPATH = Path("elope_data") / "test"
@@ -66,7 +69,7 @@ if SAVE_PLOTS:
         Path("plots") / "submissions" / WEIGHTS_PATH.parent.name, exist_ok=False
     )
     
-    PLOTS_PATH.mkdir()
+    PLOTS_PATH.mkdir(parents=True)
 
 # Set model to evaluation mode
 model.eval() 
@@ -79,7 +82,7 @@ sequences.sort()
 # Create the sequence loader 
 cfg_events = cfg_dataset["events"]
 seq_loader = SequenceLoader(
-    cfg_dataset["datapath"], 
+    DATAPATH, 
     event_integration_window=cfg_events["integration_window"],
     event_encoder_method=cfg_events["encoder_method"],
     event_clamp=cfg_events.get("clamp", -1),
@@ -166,7 +169,7 @@ for seq_id in sequences:
     for k in range(idx_beg): 
         data_k = seq_loader.get_data_at_time(times[k])  
 
-        range_init.append(data_k['rangemeter_sequence'].cpu().numpy()[-1])
+        range_init.append(data_k['rangemeter_sequence'].cpu().numpy().squeeze()[-1])
         angles_init.append(data_k['imu_sequence'].cpu().numpy()[-1, :3])        
     
     # Concatenate the lists
@@ -189,7 +192,7 @@ for seq_id in sequences:
     if SAVE_PLOTS:  
         # Create the plots with the predicted velocities 
         fig, axes = plt.subplots(nrows=3, figsize=(15,15), sharex=True)
-        for i, vi in enumerate(zip(vx, vy, vz)): 
+        for i, vi in enumerate((vx, vy, vz)): 
             axes[i].plot(times, vi)
             axes[i].set_xlim(times[0], times[-1])
             gridminor(axes[i])
@@ -205,5 +208,5 @@ for seq_id in sequences:
     LOGGER.info(f"Tested sequence: {seq_id}")
 
 # writing submission-file to drive
-with open('apelle_submission.json', 'wt') as f:
+with open(f'apelle_{SUBMISSION_NAME}.json', 'wt') as f:
     json.dump(bogus, f)
