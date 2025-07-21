@@ -19,20 +19,22 @@ from elope.utils import (
     compute_posvelz,
 )
 
+MODEL_PATH = Path("weights") / "elope-emmnet-v1-elope_20250721_153832"
+
 # Path to the yaml file containing the dataset settings
-DATASET_CFG = "cfg/dataset/dataset-5s-stamp-left-1us.yml"
+DATASET_CFG = MODEL_PATH / "dataset-cfg.yml"
 
 # Path to the yaml file containing the model settings
-MODEL_CFG = "cfg/training/emmnet-v1-elope.yml"
+MODEL_CFG = MODEL_PATH / "model-cfg.yml"
 
 # Path to PyTorch's weight file
-WEIGHTS_PATH = Path("weights") / "elope-emmnet-v1-elope_20250719_201517-0180" / "best.pth"
+WEIGHTS_PATH = MODEL_PATH / "best.pth"
 
 # True if the plots of the predictions / groundtruth should be saved for each test traj.
 SAVE_PLOTS = True
 
 # True if the output of the z-velocity should be taken from the geometry constraint
-OUTPUT_ANALYTICAL_VZ = True 
+OUTPUT_ANALYTICAL_VZ = False 
 
 # Device configuration 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
