@@ -13,13 +13,13 @@ from elope.trainers import LunarTrainer
 from elope.utils import LOGGER, load_yaml, gridminor, increment_path
 
 # Path to the yaml file containing the dataset settings
-DATASET_CFG = "cfg/dataset/dataset-5s-stamp.yml"
+DATASET_CFG = "cfg/dataset/dataset-5s-stamp-left-norm.yml"
 
 # Path to the yaml file containing the model settings
-MODEL_CFG = "cfg/training/emmnet-v1-mse-rel.yml"
+MODEL_CFG = "cfg/training/emmnet-v1-elope.yml"
 
 # Path to PyTorch's weight file
-WEIGHTS_PATH = Path("weights") / "elope-emmnet-v1-elope_20250719_123610" / "best.pth"
+WEIGHTS_PATH = Path("weights") / "elope-emmnet-v1-elope_20250719_201517-0180" / "best.pth"
 
 # True if the plots of the predictions / groundtruth should be saved for each test traj.
 SAVE_PLOTS = True
@@ -30,8 +30,8 @@ LOGGER.info(f"Using device: {device}\n")
 
 # Split the sequences between train/val 
 all_sequences = [str(i).zfill(4) for i in range(28)]
-seq_train = all_sequences[:22]  # 80% for training
-seq_val = all_sequences[22:]    # 20% for validation
+seq_train = all_sequences[:20] + ['0023', '0027'] # 80% for training 
+seq_val = all_sequences[20:23] + all_sequences[24:27]    # 20% for validation
 
 # Load the dataset config and create a Sequence Loader
 dataset_cfg = load_yaml(DATASET_CFG)
@@ -42,6 +42,7 @@ seq_loader = SequenceLoader(
     event_integration_window=events_cfg["integration_window"],
     event_encoder_method=events_cfg["encoder_method"],
     event_normalization=events_cfg["normalization"],
+    event_clamp=events_cfg.get("clamp", -1),
     event_H=events_cfg["height"],
     event_W=events_cfg["width"],
     event_T=events_cfg["channels"], 
