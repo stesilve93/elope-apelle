@@ -62,6 +62,9 @@ seq_loader = SequenceLoader(
 # Load the model config 
 model_cfg = load_yaml(MODEL_CFG)
 
+# This script is working only for seq2one models 
+assert model_cfg["seq2seq"] == False
+
 # Retrieve the type of event normalization 
 event_normalization = model_cfg["event_normalization"]
 
