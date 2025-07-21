@@ -93,10 +93,13 @@ tab_values  = []
 if SAVE_PLOTS: 
     
     # Generate the path in which to store the plots
-    PLOTS_PATH = increment_path(Path("plots") / WEIGHTS_PATH.parent.name, exist_ok=False)
-    PLOTS_PATH.mkdir()
+    PLOTS_PATH = increment_path(
+        Path("plots") / "testing" / WEIGHTS_PATH.parent.name, exist_ok=False
+    )
+    
+    PLOTS_PATH.mkdir(parents=True)
 
-for seq_id in seq_train: 
+for seq_id in seq_val: 
     
     # Load the sequence
     LOGGER.info(f"Loading test sequence: {seq_id}")
