@@ -67,11 +67,16 @@ class SequenceLoader:
         self.T = int(event_T)
         
         # Ensure the number of time bins is coherent with the encoder method 
-        if self.event_encoder_method == "last_timestamp": 
-            if self.T != 1: 
-                raise ValueError(
-                    "Event encoder `last_timestamp` supports only 1 event channel."
-                )
+        if self.event_encoder_method in ("first_timestamp", "last_timestamp") and self.T != 1: 
+            raise ValueError(
+                f"Event encoder {self.event_encoder_method} supports only 1 event channel."
+            )
+                
+        elif self.event_encoder_method == "timestamp" and self.T != 2: 
+            raise ValueError("Event encoder `timestamp` supports only 2 event channels.")
+        
+        elif self.event_encoder_method == "hybrid" and self.T != 3: 
+            raise ValueError("Event encoder `hybrid` supports only 3 event channels.")
         
         self.imu_seq_len = int(imu_seq_len)
         self.imu_padding = imu_padding
