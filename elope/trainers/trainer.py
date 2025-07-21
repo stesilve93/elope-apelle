@@ -42,7 +42,7 @@ class LunarTrainer:
         # Store the network model and hardware device 
         self.model = model
         self.device = device
-
+        
         # Store the validation and training dataset loaders
         self.train_loader = train_loader
         self.val_loader = val_loader
@@ -190,6 +190,7 @@ class LunarTrainer:
             
             # Forward pass
             outputs = self.model(events, imu, rangemeter)
+                
             predictions = outputs['prediction']
             
             # Compute loss
@@ -257,6 +258,7 @@ class LunarTrainer:
                 
                 # Run inference
                 outputs = self.model(events, imu, rangemeter)
+                
                 predictions = outputs['prediction']
                 
                 # Compute the loss 

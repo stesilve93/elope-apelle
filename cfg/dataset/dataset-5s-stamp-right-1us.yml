@@ -5,7 +5,7 @@ datapath: elope_data/train
 # Path to the folder in which to store the cached dataset model
 output_path: dataset/
 # Name prefix of the dataset
-output_name: dataset-5s-stamp-right
+output_name: dataset-5s-stamp-right-1us
 
 # If true, once the dataset has been loaded, it will be saved to the output directory 
 # written above
@@ -45,7 +45,3 @@ events:
 
   # Duration of the window in which events are integrated, in microseconds
   integration_window: 1e5
-
-  # Type of normalisation for the event tensor.
-  # Supported values are "minmax", "standard" or "null"
-  normalization: "null"
