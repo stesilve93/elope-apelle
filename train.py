@@ -30,7 +30,7 @@ model_cfg = load_yaml(MODEL_CFG)
 train_loader = ElopeDataLoader(
     DATASET_CFG,
     seq_train, 
-    # event_normalization=model_cfg["event_normalization"],
+    event_normalization=model_cfg["event_normalization"],
     augment=True, 
     batch_size=32,
     shuffle=True, 
@@ -43,7 +43,7 @@ train_loader = ElopeDataLoader(
 val_loader = ElopeDataLoader(
     DATASET_CFG, 
     seq_val, 
-    # event_normalization=model_cfg["event_normalization"],
+    event_normalization=model_cfg["event_normalization"],
     augment=False,
     batch_size=32, 
     shuffle=True, 
