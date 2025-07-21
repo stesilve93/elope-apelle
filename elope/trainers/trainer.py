@@ -195,7 +195,9 @@ class LunarTrainer:
             # Compute loss
             loss_dict = self.weighted_pose_loss(predictions, targets)
             loss = loss_dict['total_loss']
-            
+            # FIXME: Add kinematic loss to the standard structure if useful!! It seems not really effective :(
+            #loss = loss_dict['total_loss'] + outputs['kin_loss'] if 'kin_loss' in outputs else 0
+
             # Backward pass
             # with torch.autograd.detect_anomaly():
             loss.backward()

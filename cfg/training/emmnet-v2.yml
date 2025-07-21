@@ -1,0 +1,39 @@
+
+weights: 
+
+  # Path to the folder in which to store the sample weights
+  path: weights
+
+  # Name of the model
+  name: elope-emmnet-v1
+
+  # Specify every how many epochs the model weights should be saved.
+  checkpoint_epochs: 2
+
+# True if the network should only provide the velocity as an input
+velocity_only: True
+
+# True if a physics-aware IMU encoder should be used
+physics_aware: True
+
+# True if attention should be used to determine the fusion strategy
+use_attention: True
+
+# Dropout fraction for the model
+dropout: 0.15
+
+# Flag to decide whether the model is sequence2sequence (True) or just predicts the 
+# latest state.
+seq2seq: False
+
+# Training losses settings
+losses:
+
+  # Weight for the loss using absolute MSE
+  lmb_mse_abs: 0.0 
+
+  # Weight for the loss using relative MSE
+  lmb_mse_rel: 0.0 
+
+  # Weight for the ELOPE loss
+  lmb_elope: 1.0

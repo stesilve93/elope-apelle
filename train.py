@@ -16,6 +16,7 @@ DATASET_CFG = "cfg/dataset/dataset-5s-stamp-left-norm.yml"
 # Path to the yaml file containing the model settings
 MODEL_CFG = "cfg/training/emmnet-v1-elope.yml"
 
+
 # Device configuration 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 LOGGER.info(f"Using device: {device}\n")
