@@ -775,7 +775,7 @@ class RegularizedRegressor(nn.Module):
 class MultiModalVelocityEstimator(nn.Module):
     """ Multi-modal network with better regularization"""
     def __init__(self, 
-                 event_channels: int = 1,
+                 event_channels: int = 2,
                  event_output_dim: int = 128,
                  imu_output_dim: int = 32,
                  range_output_dim: int = 16,
