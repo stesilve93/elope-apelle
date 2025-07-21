@@ -15,6 +15,7 @@ from elope.utils import (
     save_pickle, 
 )
 
+from .events import EventProcessor
 from .sequence import SequenceLoader
 
 class ElopeDataset(Dataset): 
@@ -53,7 +54,6 @@ class ElopeDataset(Dataset):
             cfg["datapath"], 
             event_integration_window=cfg_events["integration_window"],
             event_encoder_method=cfg_events["encoder_method"],
-            event_normalization=cfg_events["normalization"],
             event_clamp=cfg_events.get("clamp", -1),
             event_H=cfg_events["height"],
             event_W=cfg_events["width"],
@@ -64,6 +64,10 @@ class ElopeDataset(Dataset):
         
         # Store the dataset configuration for the sequences as a hash key.
         self.hash = dict2hash(self.cfg_dataset)
+        
+        # Retrieve the type of event normalization, if given 
+        self.event_normalization = cfg.get("event_normalization", "null")
+        assert self.event_normalization in ("null", "standard", "minmax")
         
         # Check whether cached data is available, and try loading
         has_cache = False 
@@ -249,6 +253,17 @@ class ElopeDataset(Dataset):
         rangemeter = sample['rangemeter_sequence'].clone()
         targets    = sample['ground_truth']
         times      = sample['times'] 
+        
+        # Normalize the event tensor, if requested 
+        if self.event_normalization: 
+            
+            event_clamp = self.cfg_dataset["events"].get("clamp", -1)
+            max_val = event_clamp if event_clamp > 0 else None       
+            
+            for k in range(events.shape[0]): 
+                events[k] = EventProcessor.normalize_tensor(
+                    events[k], method=self.event_normalization, max_val=max_val
+                )
         
         if not self.augment: 
             # No augmentation is performed
