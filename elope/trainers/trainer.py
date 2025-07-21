@@ -15,7 +15,6 @@ from torch import optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from elope.datasets import ElopeDataLoader
-from elope.models.emmnetVelGruCheat import MultiModalVelocityEstimatorCheat
 from elope.utils import LOGGER, load_yaml
 
 from .losses import loss_elope, loss_mse_abs, loss_mse_rel
@@ -44,8 +43,6 @@ class LunarTrainer:
         self.model = model
         self.device = device
         
-        self.is_cheating = isinstance(self.model, MultiModalVelocityEstimatorCheat)
-
         # Store the validation and training dataset loaders
         self.train_loader = train_loader
         self.val_loader = val_loader
@@ -192,11 +189,7 @@ class LunarTrainer:
             self.optimizer.zero_grad()
             
             # Forward pass
-            if self.is_cheating: 
-                print(targets.shape)
-                outputs = self.model(events, imu, targets[:, :, -1])
-            else:     
-                outputs = self.model(events, imu, rangemeter)
+            outputs = self.model(events, imu, rangemeter)
                 
             predictions = outputs['prediction']
             
@@ -264,10 +257,7 @@ class LunarTrainer:
                     events = events[:, -1]
                 
                 # Run inference
-                if self.is_cheating:
-                    outputs = self.model(events, imu, rangemeter, targets[:, :, -1])
-                else: 
-                    outputs = self.model(events, imu, rangemeter)
+                outputs = self.model(events, imu, rangemeter)
                 
                 predictions = outputs['prediction']
                 
