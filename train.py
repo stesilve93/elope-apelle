@@ -15,7 +15,7 @@ from elope.utils import load_yaml
 DATASET_CFG = "cfg/dataset/dataset-5s-stamp-left-norm.yml"
 
 # Path to the yaml file containing the model settings
-MODEL_CFG = "cfg/training/emmnet-v2-seq2seq.yml"
+MODEL_CFG = "cfg/training/emmnet-v2-reduced.yml"
 
 
 # Device configuration 
@@ -58,7 +58,7 @@ if bool(cfg["seq2seq"]):
 else:
     from elope.models.emmnetVelGru import MultiModalVelocityEstimator
 
-LOGGER.info(f"Model seq2seq: {bool(cfg["seq2seq"])}\n")
+LOGGER.info("Model seq2seq: %s", cfg["seq2seq"])
 # Create the network model 
 model = MultiModalVelocityEstimator.create_model(
     MODEL_CFG, 
