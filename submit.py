@@ -18,17 +18,18 @@ from elope.utils import (
     compute_posvelz
 )
 
-# Name of the submission file 
-SUBMISSION_NAME = "elope-emmnet-v1-elope_20250719_201517-0180"
-    
-# Name of the file in which the weights are stored
-WEIGHTS_PATH = Path("weights") / "elope-emmnet-v1-elope_20250719_201517-0180" / "best.pth"
+SUBMISSION_NAME = "elope-emmnet-v1-elope_20250721_153832"
 
-# Path to the file containing the trained dataset
-CFG_PATH_DATASET = "cfg/dataset/dataset-5s-stamp-left-1us.yml"
+MODEL_PATH = Path("weights") / SUBMISSION_NAME
 
 # Path to the yaml file containing the dataset settings
-CFG_PATH_MODEL = "cfg/training/emmnet-v1-elope.yml"
+DATASET_CFG = MODEL_PATH / "dataset-cfg.yml"
+
+# Path to the yaml file containing the model settings
+MODEL_CFG = MODEL_PATH / "model-cfg.yml"
+
+# Path to PyTorch's weight file
+WEIGHTS_PATH = MODEL_PATH / "best.pth"
 
 # Path in which the sequence data is stored
 DATAPATH = Path("elope_data") / "test"
@@ -40,8 +41,8 @@ SAVE_PLOTS = True
 OUTPUT_ANALYTICAL_VZ = True
 
 # Load the configurations
-cfg_dataset = load_yaml(CFG_PATH_DATASET)
-cfg_model = load_yaml(CFG_PATH_MODEL)
+cfg_dataset = load_yaml(DATASET_CFG)
+cfg_model = load_yaml(MODEL_CFG)
 
 # This script is working only for seq2one models
 assert cfg_model["seq2seq"] == False
