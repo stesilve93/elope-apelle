@@ -13,10 +13,10 @@ from elope.utils import LOGGER, load_yaml, increment_path
 
 
 # Path to the yaml file containing the dataset settings
-DATASET_CFG = "cfg/dataset/dataset-5s-stamp-left-1us.yml"
+DATASET_CFG = "cfg/dataset/dataset-5s-hybrid-left-3us.yml"
 
 # Path to the yaml file containing the model settings
-MODEL_CFG = "cfg/training/emmnet-v2-reduced.yml"
+MODEL_CFG = "cfg/training/emmnet-v1.yml"
 
 # Device configuration 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -35,7 +35,7 @@ train_loader = ElopeDataLoader(
     DATASET_CFG,
     seq_train, 
     event_normalization=model_cfg["event_normalization"],
-    augment=True, 
+    augment=False, 
     batch_size=32,
     shuffle=True, 
     num_workers=8, 
@@ -71,7 +71,7 @@ model = MultiModalVelocityEstimator.create_model(
 trainer = LunarTrainer(MODEL_CFG, model, train_loader, val_loader, device)
 
 # Create the folder in which to store the model data 
-cfg_weights = model_cfg("weights")
+cfg_weights = model_cfg["weights"]
 
 # Get current timestamp
 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
