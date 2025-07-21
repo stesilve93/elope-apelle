@@ -291,7 +291,7 @@ class LunarTrainer:
         metrics['vel_mse_rel_loss'] = running_mse_rel_loss / len(self.val_loader)
         return metrics
     
-    def train(self, num_epochs: int, max_patience: int=10, **kwargs):
+    def train(self, num_epochs: int, max_patience: int=10, save_path: str=None, **kwargs):
         """
         Main training loop.
         
@@ -305,16 +305,22 @@ class LunarTrainer:
         
         # Check if the folder in which to store the weights exists, else create it 
         cfg_weights = self.cfg["weights"]
-                
-        # Get current timestamp
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        # Retrieve the folder in which to store the results
-        save_path = Path(kwargs.get("save_path", cfg_weights["path"]))
-        save_name = kwargs.get("save_name", cfg_weights["name"]) + f"_{timestamp}"
-        save_path_model = save_path / save_name
-        save_path_model.mkdir(parents=True, exist_ok=False)
+        if save_path is None:
+            
+            # Get current timestamp
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         
+            # Retrieve the folder in which to store the results
+            save_path = Path(kwargs.get("save_path", cfg_weights["path"]))
+            save_name = kwargs.get("save_name", cfg_weights["name"]) + f"_{timestamp}"
+            save_path_model = save_path / save_name
+            save_path_model.mkdir(parents=True, exist_ok=False)
+        
+        else: 
+            save_path_model = save_path    
+        
+            
         # Retrieve the number of epochs between each saved checkpoint
         ckp_epochs = int(cfg_weights["checkpoint_epochs"])
         
@@ -372,7 +378,9 @@ class LunarTrainer:
                 LOGGER.warning("Early stopping triggered. No improvement for 10 epochs.")
                 break
 
-    def plot_training(self, save_figure=False, figure_name_prefix="training_plot"):
+    def plot_training(
+        self, save_figure=False, path: str | Path="/plots/training/", filename: str=None
+    ):
         """
         Plots the training and validation losses over epochs.
         Args:
@@ -404,8 +412,10 @@ class LunarTrainer:
             # Get current timestamp
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             
-            # Ensure the 
-            outpath = Path(f"{figure_name_prefix}_{timestamp}.png")
+            if filename is None: 
+                filename = f"training_{timestamp}.png"
+            
+            outpath = Path(path) / filename
             if not outpath.parent.exists(): 
                 # Ensure the output directory exists
                 outpath.parent.mkdir(parents=True)

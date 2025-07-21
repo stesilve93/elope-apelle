@@ -66,12 +66,22 @@ class SequenceLoader:
         self.W = int(event_W)
         self.T = int(event_T)
         
+        # Ensure the encoder method is supported
+        assert self.event_encoder_method in (
+            "first_timestamp", "last_timestamp", "timestamp", "count", "hybrid"
+        )
+        
         # Ensure the number of time bins is coherent with the encoder method 
-        if self.event_encoder_method == "last_timestamp": 
-            if self.T != 1: 
-                raise ValueError(
-                    "Event encoder `last_timestamp` supports only 1 event channel."
-                )
+        if self.event_encoder_method in ("first_timestamp", "last_timestamp") and self.T != 1: 
+            raise ValueError(
+                f"Event encoder {self.event_encoder_method} supports only 1 event channel."
+            )
+                
+        elif self.event_encoder_method == "timestamp" and self.T != 2: 
+            raise ValueError("Event encoder `timestamp` supports only 2 event channels.")
+        
+        elif self.event_encoder_method == "hybrid" and self.T != 3: 
+            raise ValueError("Event encoder `hybrid` supports only 3 event channels.")
         
         self.imu_seq_len = int(imu_seq_len)
         self.imu_padding = imu_padding
@@ -344,12 +354,7 @@ class SequenceLoader:
         if events_array.shape[0] == 0: 
             # LOGGER.warning("No events found in the specified time window.")
             # Return an empty tensor with the expected shape 
-            if self.event_encoder_method == "count": 
-                return np.zeros((2, T, H, W), dtype=np.float32)
-            elif self.event_encoder_method == "last_timestamp": 
-                return np.zeros((2, 1, H, W), dtype=np.float32)
-            else: 
-                raise ValueError("Unsupported event encoding method")
+            return np.zeros((2, T, H, W), dtype=np.float32)
         
         # Convert the filtered events into a 4D tensor 
         tensor = self.processor.events_to_tensor(
