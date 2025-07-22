@@ -103,9 +103,10 @@ class ElopeDataset(Dataset):
             # Parse the target sequences.
             seq_samples = {}
             for seq_id in seq_names:
-                subsamples = self.parse_sequence(seq_id)
+                # Retrieve the sequence data
+                seq_data = self.parse_sequence(seq_id)
                 if len(subsamples) > 0: 
-                    seq_samples[int(seq_id)] = subsamples
+                    seq_samples[int(seq_id)] = seq_data
                 
             # Save the cached data 
             if cfg["save_cache"]:
@@ -241,39 +242,44 @@ class ElopeDataset(Dataset):
             return []
 
         # Retrieve sequence times, rangemeter, IMU and ground-truth data
-        times   = torch.from_numpy(self.seq_loader.timestamps_full.astype(np.float32))
-        targets = torch.from_numpy(self.seq_loader.trajectory_full[:, 0:6].astype(np.float32))
-        imus    = torch.from_numpy(self.seq_loader.trajectory_full[:, 6:12].astype(np.float32))
+        times   = self.seq_loader.timestamps_full
+        targets = self.seq_loader.trajectory_full[:, 0:6]
+        imus    = self.seq_loader.trajectory_full[:, 6:12]
         
         # Interpolate the rangemeter values at this time
-        rangemeters = torch.from_numpy(
-            np.interp(
-                times,
-                self.seq_loader.rangemeter_full[:, 0], 
-                self.seq_loader.rangemeter_full[:, 1], 
-            ).astype(np.float32)
+        rangemeters = np.interp(
+            times,
+            self.seq_loader.rangemeter_full[:, 0], 
+            self.seq_loader.rangemeter_full[:, 1], 
         )
-            
+        
         # Load the events on the left-side of the points
         self.seq_loader.preprocess_events(side="left")    
-        events_left = torch.from_numpy(self.seq_loader.events_tensor.astype(np.float32)) 
+        events_left = self.seq_loader.events_tensor 
         
         # Load the events on the right-side of the points 
         self.seq_loader.preprocess_events(side="right")
-        events_right = torch.from_numpy(self.seq_loader.events_tensor.astype(np.float32)) 
+        events_right = self.seq_loader.events_tensor
         
         # Retrieve the sequence sampling interval 
         sample_interval = int(self.cfg_dataset["sample_interval"])
         
-        # Create a single sample for each point in the trajectory      
-        subsamples = []
-        for k in range(0, self.seq_loader.seq_len, sample_interval): 
-            subsamples.append((
-                times[k], targets[k], imus[k], rangemeters[k], 
-                events_left[k], events_right[k]
-            ))
-                    
-        return subsamples
+        # Retrieve all the arrays at the the target interval
+        tms_out = torch.from_numpy(times[::sample_interval].astype(np.float32))
+        trg_out = torch.from_numpy(targets[::sample_interval].astype(np.float32))
+        imu_out = torch.from_numpy(imus[::sample_interval].astype(np.float32))
+        rng_out = torch.from_numpy(rangemeters[::sample_interval].astype(np.float32))
+        evl_out = torch.from_numpy(events_left[::sample_interval].astype(np.float32))
+        evr_out = torch.from_numpy(events_right[::sample_interval].astype(np.float32))
+
+        return {
+            "times": tms_out, 
+            "targets": trg_out, 
+            "imu": imu_out, 
+            "rangemter": rng_out, 
+            "events_left": evl_out,
+            "events_right": evr_out
+        }
     
     def __len__(self) -> int: 
         return len(self.samples)
