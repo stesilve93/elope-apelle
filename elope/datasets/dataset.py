@@ -317,32 +317,56 @@ class ElopeDataset(Dataset):
         return len(self.samples)
     
     def __getitem__(self, idx: int) -> tuple: 
-
+        
+        # Make sure the input is always a vector
+        is_scalar = np.isscalar(idx)
+        if is_scalar:
+            idx = [idx]
+        
+        # Retrieve batch dimension and IMU sequence
+        nb, ni = len(idx), self.imu_seq_len
+        
+        # Retrieve events tensor shape 
+        T, H, W = self.seq_loader.T, self.seq_loader.H, self.seq_loader.W
+        
         # Check whether the dataset should be flipped
-        flip = self.augment and torch.rand(1).item() < self.flip_prob
+        flip = self.augment and torch.rand(nb).item() < self.flip_prob
         
-        if flip: 
-            return self._getseq_right(idx)
-        else: 
-            return self._getseq_left(idx)
+        # Initialize all the arrays 
+        times   = torch.empty(nb, ni, dtype=torch.float32)
+        targets = torch.empty(nb, ni, 6, dtype=torch.float32) 
+        imus    = torch.empty(nb, ni, 6, dtype=torch.float32)
+        ranges  = torch.empty(nb, ni, 1, dtype=torch.float32)
+        events  = torch.empty(nb, ni, 2, T, H, W, dtype=torch.float32)
         
-    def _getseq_left(self, idx: int) -> tuple: 
+        for k, idk in enumerate(idx):
+            # For each index check whether the sequence should be flipped or not.
+            if flip[k]: 
+                self._getseq_right(idk, events[k], imus[k], ranges[k], targets[k], times[k])
+            else: 
+                self._getseq_left(idk, events[k], imus[k], ranges[k], targets[k], times[k])
+        
+        if is_scalar: 
+            # If the input was a scalar value, return tensors without the batch dimension
+            events = events.squeeze(0)
+            imus = imus.squeeze(0) 
+            ranges = ranges.squeeze(0) 
+            targets = targets.squeeze(0)
+            times = times.squeeze(0) 
+            
+        return events, imus, ranges, targets, times 
+        
+    def _getseq_left(
+        self, 
+        idx: int, 
+        events: torch.Tensor, 
+        imus: torch.Tensor, 
+        ranges: torch.Tensor, 
+        targets: torch.Tensor, 
+        times: torch.Tensor,     
+    ) -> tuple: 
         """Retrieve a forward sequence at at given dataset index."""
-                
-        # Initialize the tensors in which all the data should be stored
-        times   = torch.empty(self.imu_seq_len, dtype=torch.float32)
-        targets = torch.empty(self.imu_seq_len, 6, dtype=torch.float32) 
-        imus    = torch.empty(self.imu_seq_len, 6, dtype=torch.float32) 
-        ranges  = torch.empty(self.imu_seq_len, 1, dtype=torch.float32)
-        
-        # Compute the expected shape of the event tensor
-        events_shape = (
-            self.imu_seq_len, 2, self.seq_loader.T, self.seq_loader.H, self.seq_loader.W
-        )
-        
-        # Initialise the event tensor
-        events  = torch.empty(*events_shape, dtype=torch.float32)
-        
+            
         # Retrieve the starting index of the sequence in which we are
         idx_offset = idx - self.seq_indexes_beg
         idx_beg = int(self.seq_indexes_beg[np.argmin(idx_offset[idx_offset >= 0])])
@@ -362,7 +386,6 @@ class ElopeDataset(Dataset):
             targets[k, :] = sk[1]
             imus[k, :] = sk[2]
             ranges[k, :] = sk[3]
-            
             events[k, :] = sk[4]
         
         # Add the initial padding values for the remaining data
@@ -393,30 +416,22 @@ class ElopeDataset(Dataset):
                 )
                 
         # Normalize time w.r.t. the beginning of the sequence 
-        times = times - times[0]
-        
-        if not self.augment: 
-            return events, imus, ranges, targets, times
+        times[:] = times[:] - times[0]
         
         # Add augmentation 
-        return self._augment(events, imus, ranges, targets, times)
+        if self.augment:
+            self._augment(events, imus, ranges, targets, times)
     
-    def _getseq_right(self, idx: int) -> tuple: 
+    def _getseq_right(
+        self, 
+        idx: int,
+        events: torch.Tensor, 
+        imus: torch.Tensor, 
+        ranges: torch.Tensor, 
+        targets: torch.Tensor, 
+        times: torch.Tensor,    
+    ) -> tuple: 
         """Retrieve a backward sequence at a given dataset index."""
-        
-        # Initialize the tensors in which all the data should be stored
-        times   = torch.empty(self.imu_seq_len, dtype=torch.float32)
-        targets = torch.empty(self.imu_seq_len, 6, dtype=torch.float32) 
-        imus    = torch.empty(self.imu_seq_len, 6, dtype=torch.float32) 
-        ranges  = torch.empty(self.imu_seq_len, 1, dtype=torch.float32)
-        
-        # Compute the expected shape of the event tensor
-        events_shape = (
-            self.imu_seq_len, 2, self.seq_loader.T, self.seq_loader.H, self.seq_loader.W
-        )
-        
-        # Initialise the event tensor
-        events  = torch.empty(*events_shape, dtype=torch.float32)
         
         # Retrieve the starting index of the sequence in which we are 
         idx_offset = idx - self.seq_indexes_end
@@ -437,7 +452,6 @@ class ElopeDataset(Dataset):
             targets[k, :] = sk[1]
             imus[k, :] = sk[2]
             ranges[k, :] = sk[3]
-            
             events[k, :] = sk[5]  
         
         # Add the initial padding values for the remaining data 
@@ -464,7 +478,7 @@ class ElopeDataset(Dataset):
                 events[:npads] = 1.0
         
         # Invert the timings (otherwise derivatives are not coherent in time) 
-        times = times.flip(0)
+        times[:] = times.flip(0)
         
         # Invert the sign of the velocity quantities 
         imus[:, 3:6]    = -imus[:, 3:6]
@@ -482,21 +496,26 @@ class ElopeDataset(Dataset):
                 )
                 
         # Normalize time w.r.t. the beginning of the sequence 
-        times = times - times[0]
-        
-        if not self.augment:
-            return events, imus, ranges, targets, times 
+        times[:] = times[:] - times[0]
         
         # Add augmentation 
-        return self._augment(events, imus, ranges, targets, times)
-        
-    def _augment(self, events, imus, ranges, targets, times) -> tuple: 
+        if self.augment:
+            self._augment(events, imus, ranges, targets, times)
+    
+    def _augment(
+        self, 
+        events: torch.Tensor, 
+        imus: torch.Tensor, 
+        ranges: torch.Tensor, 
+        targets: torch.Tensor, 
+        times: torch.Tensor
+    ) -> tuple: 
         """Function to add noise on dataset samples."""
 
         if self.rangemeter_noise > 0.0: 
             # Add rangemeter noise on the sequence 
             noise_fct = 2*torch.rand(ranges.shape) - 1 
-            ranges = ranges*(1 + self.rangemeter_noise*noise_fct)
+            ranges[:] = ranges*(1 + self.rangemeter_noise*noise_fct)
             
         if self.angles_noise > 0.0: 
             # Add noise on the Euler angles 
@@ -509,5 +528,3 @@ class ElopeDataset(Dataset):
             imus[..., 3:6] = imus[..., 3:6]*(1 + self.angles_vel_noise*noise_fct)
 
         # TODO: EVENT NOISE???
-
-        return events, imus, ranges, targets, times
