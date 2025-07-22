@@ -329,8 +329,11 @@ class ElopeDataset(Dataset):
         # Retrieve events tensor shape 
         T, H, W = self.seq_loader.T, self.seq_loader.H, self.seq_loader.W
         
-        # Check whether the dataset should be flipped
-        flip = self.augment and torch.rand(nb).item() < self.flip_prob
+        # Check whether the data sequence should be flipped
+        if self.augment: 
+            flip = torch.rand(nb) < self.flip_prob
+        else: 
+            flip = torch.zeros(nb, dtype=torch.bool)
         
         # Initialize all the arrays 
         times   = torch.empty(nb, ni, dtype=torch.float32)
