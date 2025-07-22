@@ -611,6 +611,54 @@ class GRURangemeterEncoder(nn.Module):
         
         return output
 
+class TemporalSequenceEncoder(nn.Module):
+    """
+    Encodes a sequence of timestamps into a fixed-size temporal embedding.
+    """
+    def __init__(self, input_dim: int = 1, hidden_dim: int = 32, output_dim: int = 64, num_layers: int = 1):
+        """
+        Initializes the TemporalSequenceEncoder.
+
+        Args:
+            input_dim (int): Dimension of a single timestamp (usually 1).
+            hidden_dim (int): Hidden dimension of the GRU.
+            output_dim (int): Desired output dimension of the temporal embedding.
+            num_layers (int): Number of GRU layers.
+        """
+        super().__init__()
+        # GRU to process the sequence of timestamps
+        self.gru = nn.GRU(
+            input_dim, hidden_dim, num_layers,
+            batch_first=True,
+            bidirectional=False # Unidirectional is usually sufficient for timestamps
+        )
+
+        # Linear layer to project the final hidden state to the desired output_dim
+        self.output_proj = nn.Sequential(
+            nn.LayerNorm(hidden_dim), # Normalize before final projection
+            nn.GELU(),
+            nn.Linear(hidden_dim, output_dim)
+        )
+
+    def forward(self, timestamps):
+        """
+        Encodes the timestamp sequence.
+
+        Args:
+            timestamps (torch.Tensor): Tensor of timestamps of shape (B, T).
+
+        Returns:
+            torch.Tensor: Temporal embedding of shape (B, output_dim).
+        """
+        # GRU expects input of shape (B, T, input_dim)
+        gru_input = timestamps.float() # Ensure float type
+
+        _, last_hidden_state = self.gru(gru_input)
+        # last_hidden_state is (num_layers, B, hidden_dim)
+        # We take the hidden state of the last layer
+        temporal_embedding = self.output_proj(last_hidden_state[-1]) # (B, output_dim)
+
+        return temporal_embedding
 
 class CrossModalAttention(nn.Module):
     """
@@ -624,7 +672,8 @@ class CrossModalAttention(nn.Module):
     dropout (float, optional): Dropout probability for the attention mechanism and feed-forward network (default: 0.1)
     """
     def __init__(self, event_dim: int, imu_dim: int, range_dim: int, 
-                 hidden_dim: int = 128, dropout: float = 0.1, use_physics_aware: bool = False):
+                 hidden_dim: int = 128, dropout: float = 0.1, use_physics_aware: bool = False,
+                 temporal_embedding_dim: int = 128):
         super().__init__()
         
         # Feature projections with layer normalization
@@ -643,6 +692,13 @@ class CrossModalAttention(nn.Module):
             # Normalize the projected features
             nn.LayerNorm(hidden_dim)
         )
+
+        # No separate time_proj here; we directly use the learned temporal_embedding
+        # If temporal_embedding_dim != hidden_dim, you'd need a proj layer here:
+        if temporal_embedding_dim != hidden_dim:
+            self.temporal_embedding_adaptor = nn.Linear(temporal_embedding_dim, hidden_dim)
+        else:
+            self.temporal_embedding_adaptor = nn.Identity() # No adaptation needed
 
         self.use_physics_aware = use_physics_aware
         if self.use_physics_aware:
@@ -679,12 +735,20 @@ class CrossModalAttention(nn.Module):
         #self.modal_weights = nn.Parameter(torch.ones(3)) # Learnable weights for each modality
 
         
-    def forward(self, event_feat, imu_feat, range_feat, consistency_score):
+    def forward(self, event_feat, imu_feat, range_feat, consistency_score, temporal_embedding):
         # Project features
         e_proj = self.event_proj(event_feat)
         i_proj = self.imu_proj(imu_feat)
         r_proj = self.range_proj(range_feat)
         
+        # Adapt temporal embedding dimension if necessary, then add to ALL features
+        adapted_temporal_embedding = self.temporal_embedding_adaptor(temporal_embedding) # (B, hidden_dim)
+
+        # Additive embedding to each modality
+        e_proj = e_proj + adapted_temporal_embedding
+        i_proj = i_proj + adapted_temporal_embedding
+        r_proj = r_proj + adapted_temporal_embedding
+
         # Stack for attention (seq_len=3, batch, hidden_dim)
         features = torch.stack([e_proj, i_proj, r_proj], dim=0)
 
@@ -815,12 +879,26 @@ class MultiModalVelocityEstimator(nn.Module):
         self.use_attention = use_attention
         self.use_physics_aware = use_physics_aware
 
+        # Define the temporal embedding dimension equal to
+        #  hidden_dim of the CrossModalAttention.
+        self.temporal_embedding_dim = 128 # Assuming CrossModalAttention hidden_dim
+
+        # Instantiate the new TemporalSequenceEncoder
+        self.temporal_encoder = TemporalSequenceEncoder(
+            input_dim=1, # Each timestamp is a single scalar
+            hidden_dim=self.temporal_embedding_dim // 2, # Smaller GRU hidden for embedding
+            output_dim=self.temporal_embedding_dim # Output dimension for additive fusion
+        )
+
         if use_attention:
             # Use cross-modal attention mechanism for feature fusion
             self.fusion = CrossModalAttention(
-                event_output_dim, imu_output_dim, range_output_dim, dropout=dropout, use_physics_aware=self.use_physics_aware
+                event_output_dim, imu_output_dim, range_output_dim, 
+                hidden_dim=self.temporal_embedding_dim,
+                dropout=dropout, use_physics_aware=self.use_physics_aware,
+                temporal_embedding_dim=self.temporal_embedding_dim
             )
-            fusion_input_dim = 128  # Hidden dimension for attention
+            fusion_input_dim = self.temporal_embedding_dim  # Hidden dimension for attention
         else:
             # Simple concatenation of feature dimensions
             fusion_input_dim = event_output_dim + imu_output_dim + range_output_dim
@@ -884,9 +962,14 @@ class MultiModalVelocityEstimator(nn.Module):
             consistency_score = 0 # Placeholder for consistency score if not using physics-aware
         range_feat = self.range_encoder(range_tensor)
         
+        # Encode the full timestamp sequence into a temporal embedding
+        temporal_embedding = self.temporal_encoder(times) # (B, temporal_embedding_dim)
+
         # Fusion
         if self.use_attention:
-            fused_feat, attention_weights = self.fusion(event_feat, imu_feat, range_feat, consistency_score)
+            fused_feat, attention_weights = self.fusion(
+                event_feat, imu_feat, range_feat, 
+                consistency_score, temporal_embedding)
         else:
             fused_feat = torch.cat([event_feat, imu_feat, range_feat], dim=1)
             attention_weights = None
