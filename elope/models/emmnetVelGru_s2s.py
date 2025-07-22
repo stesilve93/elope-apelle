@@ -37,7 +37,7 @@ class PhysicsConsistencyGate(nn.Module):
             nn.Sigmoid()  
         )
         
-    def forward(self, angles, body_rates):
+    def forward(self, angles, body_rates, times):
         """
         Calculate physics consistency and return gating weights
         """
@@ -47,6 +47,8 @@ class PhysicsConsistencyGate(nn.Module):
         
         # Calculate actual angle derivatives
         angle_derivatives = torch.diff(angles, dim=1)  # (B, T-1, 3)
+        time_diff = torch.diff(times, dim=1)  # (B, 1)
+        angle_derivatives = angle_derivatives / time_diff
         
         # Calculate expected derivatives from kinematics
         expected_derivatives = self._body_to_world_rates(
@@ -195,13 +197,13 @@ class PhysicsAwareIMUEncoder(nn.Module):
         )
         
         
-    def forward(self, x):
+    def forward(self, x, times):
         # Input shape: (B, T, 6) - [phi, theta, psi, p, q, r]
         angles = x[..., :3]
         body_rates = x[..., 3:]
         
         # Get physics consistency score
-        consistency_score, kin_loss = self.physics_gate(angles, body_rates)  # (B, 1)
+        consistency_score, kin_loss = self.physics_gate(angles, body_rates, times)  # (B, 1)
         
         # Project input features
         x_proj = self.input_proj(x) * math.sqrt(self.d_model)
@@ -252,7 +254,7 @@ class KinematicConstraintLayer(nn.Module):
         # Adaptive mixing parameter
         self.mixing_param = nn.Parameter(torch.tensor(0.5))
         
-    def forward(self, features, raw_imu_data):
+    def forward(self, features, raw_imu_data, times):
         """
         Apply kinematic constraint rectification to features.
 
@@ -277,6 +279,9 @@ class KinematicConstraintLayer(nn.Module):
         
         # Calculate kinematic consistency
         angle_derivatives = torch.diff(angles, dim=1)
+        time_diff = torch.diff(times, dim=1)  # (B, 1)
+        angle_derivatives = angle_derivatives / time_diff
+
         expected_derivatives = self._body_to_world_rates(
             angles[:, :-1], body_rates[:, :-1]
         )
@@ -794,10 +799,14 @@ class MultiModalVelocityEstimator(nn.Module):
                 nn.init.kaiming_normal_(module.weight, mode='fan_out', nonlinearity='relu')
     
     def forward(self, times, event_tensor, imu_tensor, range_tensor):
+
+        # Adjust times dimension
+        times = times.unsqueeze(2)
+
         # Extract sequential features
         event_feat = self.event_encoder(event_tensor)  # (B, T, event_output_dim)
         if self.use_physics_aware:
-            imu_feat, consistency_score, kin_loss = self.imu_encoder(imu_tensor)  # (B, T, imu_output_dim)
+            imu_feat, consistency_score, kin_loss = self.imu_encoder(imu_tensor, times)  # (B, T, imu_output_dim)
         else:
             imu_feat = self.imu_encoder(imu_tensor)
             consistency_score = torch.zeros(imu_tensor.size(0), 1, device=imu_tensor.device)
@@ -817,7 +826,7 @@ class MultiModalVelocityEstimator(nn.Module):
             B, T, F = fused_feat.shape
             fused_flat = fused_feat.reshape(B*T, F)
             imu_flat = imu_tensor.reshape(B*T, -1)
-            constrained_flat = self.kinematic_constraint(fused_flat, imu_flat)
+            constrained_flat = self.kinematic_constraint(fused_flat, imu_flat, times)
             constrained_feat = constrained_flat.reshape(B, T, F)
             output = self.regressor(constrained_feat)
         else:             

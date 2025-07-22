@@ -15,7 +15,7 @@ from elope.utils import LOGGER, load_yaml, increment_path
 DATASET_CFG = "cfg/dataset/dataset-hybrid-1us.yml"
 
 # Path to the yaml file containing the model settings
-MODEL_CFG = "cfg/training/emmnet-v1.yml"
+MODEL_CFG = "cfg/training/emmnet-v2.yml"
 
 # Device configuration 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -23,8 +23,10 @@ LOGGER.info(f"Using device: {device}\n")
 
 # Split the sequences between train/val 
 all_sequences = [str(i).zfill(4) for i in range(28)]
-seq_train = all_sequences[:20] + ['0023', '0027'] # 80% for training 
-seq_val = all_sequences[20:23] + all_sequences[24:27]    # 20% for validation
+#seq_train = all_sequences[:20] + ['0023', '0027'] # 80% for training 
+#seq_val = all_sequences[20:23] + all_sequences[24:27]    # 20% for 
+seq_train = all_sequences[:22] # 80% for training 
+seq_val = all_sequences[22:]   # 20% for validation
 
 # Load the model config.
 model_cfg = load_yaml(MODEL_CFG)
