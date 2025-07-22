@@ -90,7 +90,7 @@ model.to(device)
 # Retrieve the starting index 
 idx_beg = seq_loader.imu_seq_len - 1
 
-tab_headers = ["sequence", "vel_mse_abs", "vel_mse_rel", "elope_score"]
+tab_headers = ["sequence", "time_step", "vel_mse_abs", "vel_mse_rel", "elope_score"]
 tab_values  = []
 
 if SAVE_PLOTS: 
@@ -108,6 +108,9 @@ for seq_id in seq_val:
     LOGGER.info(f"Loading test sequence: {seq_id}")
     seq_loader.load_sequence(seq_id)
     seq_loader.preprocess_events(side="left")
+    
+    # Compute the timestep of this sequence 
+    seq_dt = seq_loader.timestamps_full[1] - seq_loader.timestamps_full[0]
     
     # Initialize the arrays for the results
     predictions, targets, times = [], [], []
@@ -180,8 +183,8 @@ for seq_id in seq_val:
     )
     
     # Store the statistics of this trajectory
-    seq_metrics = [seq_id]
-    for header in tab_headers[1:]: 
+    seq_metrics = [seq_id, seq_dt]
+    for header in tab_headers[2:]: 
         seq_metrics.append(float(test_metrics[header]))
         
     tab_values.append(seq_metrics)
