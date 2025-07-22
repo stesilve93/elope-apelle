@@ -5,10 +5,18 @@ weights:
   path: weights
 
   # Name of the model
-  name: elope-emmnet-v1-elope
+  name: elope-emmnet-v1
 
   # Specify every how many epochs the model weights should be saved.
-  checkpoint_epochs: 5
+  checkpoint_epochs: 10
+
+# Set the type of IMU padding. Support values are "copy", "static". 
+# - copy simply fills unavailable states with a copy of the first available data. 
+# - static copies position/range/angles but sets velocity and angular velocity to zero.
+imu_padding: static 
+
+# Length of the IMU sequence
+imu_sequence_length: 5
 
 # Type of normalization for the event tensor. Supported values are "null", "standard", 
 # or "minmax".
