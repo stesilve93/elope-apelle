@@ -87,14 +87,20 @@ class ElopeDataset(Dataset):
 
         # If we haven't got cached data, parse the entire sequence files and build it.
         if not has_cache: 
-        
-            # Parse all the files within the directory
-            seq_files = getfiles(cfg["datapath"], ".npz")
-            seq_files.sort() 
             
-            # Retrieve the IDs of all the target sequences
-            seq_names = [s.stem for s in seq_files]
+            if cfg["save_cache"]: 
+
+                # Parse all the files within the directory
+                seq_files = getfiles(cfg["datapath"], ".npz")
+                seq_files.sort() 
+                
+                seq_names = [s.stem for s in seq_files]
             
+            else: 
+                # Since we are not caching the data, we don't need to process all seqs.    
+                seq_names = sequence_ids
+                
+            # Parse the target sequences.
             seq_samples = {}
             for seq_id in seq_names:
                 subsamples = self.parse_sequence(seq_id)
