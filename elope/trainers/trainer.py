@@ -189,8 +189,7 @@ class LunarTrainer:
             self.optimizer.zero_grad()
             
             # Forward pass
-            outputs = self.model(events, imu, rangemeter)
-                
+            outputs = self.model(times, events, imu, rangemeter)
             predictions = outputs['prediction']
             
             # Compute loss
@@ -257,8 +256,7 @@ class LunarTrainer:
                     events = events[:, -1]
                 
                 # Run inference
-                outputs = self.model(events, imu, rangemeter)
-                
+                outputs = self.model(times, events, imu, rangemeter)
                 predictions = outputs['prediction']
                 
                 # Compute the loss 
@@ -345,7 +343,7 @@ class LunarTrainer:
             self.scheduler.step(val_loss)
             
             # Check whether we are at a checkpoint for saving the weights
-            if (epoch % ckp_epochs) == 0:
+            if epoch > 0 and (epoch % ckp_epochs) == 0:
                 torch.save(self.model.state_dict(), save_path_model / f"{epoch}.pth")
                 print(
                     " "*6, f"Model weights saved! Val. Metric ({self.val_metric_key}): " 

@@ -5,7 +5,7 @@ datapath: elope_data/train
 # Path to the folder in which to store the cached dataset model
 output_path: dataset/
 # Name prefix of the dataset
-output_name: dataset-5s-stamp-right-1us
+output_name: dataset-stamp-1us
 
 # If true, once the dataset has been loaded, it will be saved to the output directory 
 # written above
@@ -14,22 +14,9 @@ save_cache: True
 # If true, the program will first look for a dataset file in the output directory
 use_cached: True
 
-# Determine the direction in which each sequence should be approached. Supported values are 
-# "left" for the original time-forward direction, "right" for the inverse motion and 
-# "both" to include a copy of both.
-side: right
-
 # Sampling interval along the trajectory. It determines how many state points are 
 # retrieved from that trajectory. 
 sample_interval: 1
-
-# Length of the IMU sequence
-imu_sequence_length: 5
-
-# Set the type of IMU padding. Support values are "copy", "static". 
-# - copy simply fills unavailable states with a copy of the first available data. 
-# - static copies position/range/angles but sets velocity and angular velocity to zero.
-imu_padding: static
 
 events: 
   
@@ -38,10 +25,11 @@ events:
   # Vertical dimension of the image, in pixels.
   height: 200
   # Dimension for the event tensor (i.e., number of time bins)
-  channels: 1 
+  channels: 2
 
-  # Type of event encoding, either "count" or "last_timestamp"
-  encoder_method: last_timestamp 
+  # Type of event encoding, either "count", "last_timestamp", "first_timestamp", 
+  # "timestamp" or "hybrid"
+  encoder_method: timestamp 
 
   # Duration of the window in which events are integrated, in microseconds
   integration_window: 1e5

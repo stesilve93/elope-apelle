@@ -793,7 +793,7 @@ class MultiModalVelocityEstimator(nn.Module):
             elif isinstance(module, (nn.Conv3d, nn.Conv2d, nn.Conv1d)):
                 nn.init.kaiming_normal_(module.weight, mode='fan_out', nonlinearity='relu')
     
-    def forward(self, event_tensor, imu_tensor, range_tensor):
+    def forward(self, times, event_tensor, imu_tensor, range_tensor):
         # Extract sequential features
         event_feat = self.event_encoder(event_tensor)  # (B, T, event_output_dim)
         if self.use_physics_aware:

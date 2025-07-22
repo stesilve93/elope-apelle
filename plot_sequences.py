@@ -5,17 +5,24 @@ import torch
 
 from pathlib import Path 
 
+from tabulate import tabulate
+
 from elope.datasets import SequenceLoader
 from elope.utils import LOGGER, load_yaml, gridminor, getfiles
 
+MODEL_PATH = Path("weights") / "elope-emmnet-v1-elope_20250722_070237"
+
 # Path to the yaml file containing the dataset settings
-DATASET_CFG = "cfg/dataset/dataset-5s-stamp-left-1us.yml"
+DATASET_CFG = MODEL_PATH / "dataset-cfg.yml"
 
 # Path to the yaml file containing the model settings
-MODEL_CFG = "cfg/training/emmnet-v2.yml"
+MODEL_CFG = MODEL_PATH / "model-cfg.yml"
 
 # Path to PyTorch's weight file
-WEIGHTS_PATH = Path("weights") / "elope-emmnet-v1_20250721_153257" / "best.pth"
+WEIGHTS_PATH = MODEL_PATH / "best.pth"
+
+# True/False dependign on whether you would like to save the plots
+SAVE_PLOTS = False
 
 # Path to the folder in which to store the plots
 PLOT_PATH = Path("plots") / "sequences"
@@ -28,8 +35,14 @@ LOGGER.info(f"Using device: {device}\n")
 dataset_cfg = load_yaml(DATASET_CFG)
 events_cfg = dataset_cfg["events"]
 
+# Load the model config 
+model_cfg = load_yaml(MODEL_CFG)
+
 data_path = Path("elope_data")
 modes = ["train", "test"]
+
+tab_headers = ["mode", "sequence", "time_step"]
+tab_values = []
 
 for mode in modes: 
 
@@ -38,12 +51,16 @@ for mode in modes:
         data_path / mode,
         event_integration_window=events_cfg["integration_window"],
         event_encoder_method=events_cfg["encoder_method"],
+        event_clamp=events_cfg.get("clamp", -1),
         event_H=events_cfg["height"],
         event_W=events_cfg["width"],
-        event_T=1, 
-        imu_seq_len=dataset_cfg["imu_sequence_length"], 
-        imu_padding=dataset_cfg["imu_padding"]
+        event_T=events_cfg["channels"], 
+        imu_seq_len=int(model_cfg["imu_sequence_length"]), 
+        imu_padding=model_cfg["imu_padding"]
     )
+   
+    # Retrieve the type of event normalization 
+    event_normalization = model_cfg["event_normalization"]
     
     # Retrieve all the sequences in that path 
     sequences = getfiles(data_path /  mode, ".npz")
@@ -54,23 +71,22 @@ for mode in modes:
         
         # Save the trajectory states and IMU readings
         seq_loader.load_sequence(seq)
-        seq_loader.preprocess_events(side="left")
-        
         targets, imu, rangemeter = [], [], []
         
-        for k in range(seq_loader.seq_len): 
-            
-            s = seq_loader.get_data_at_time(seq_loader.timestamps_full[k])
-            
-            rangemeter.append(s['rangemeter_sequence'].cpu().numpy()[-1])
-            imu.append(s['imu_sequence'].cpu().numpy()[-1])
-            targets.append(s['ground_truth'].cpu().numpy()[-1])
-
-        # Retrieve all the states
         times = seq_loader.timestamps_full
-        targets = np.array(targets)
-        imu = np.array(imu)
-        rangemeter = np.array(rangemeter).squeeze()
+        targets = np.array(seq_loader.trajectory_full[:, 0:6])
+        imu = np.array(seq_loader.trajectory_full[:, 6:12])
+        rangemeter = np.interp(
+            times, 
+            seq_loader.rangemeter_full[:, 0], 
+            seq_loader.rangemeter_full[:, 1],
+        )
+        
+        # Store the simulation timestep
+        tab_values.append([mode, seq, times[1]-times[0]])
+        
+        if not SAVE_PLOTS: 
+            continue
         
         PLOT_PATH_SEQ = PLOT_PATH / mode / seq
         PLOT_PATH_SEQ.mkdir(exist_ok=True, parents=True)
@@ -135,4 +151,9 @@ for mode in modes:
         plt.savefig(PLOT_PATH_SEQ / "trajectory.png", dpi=300) 
         plt.close(fig)
         
+        
+# Display the timesteps results
+LOGGER.info("Timestep statistics:")
+table = tabulate(tab_values, headers=tab_headers, tablefmt="fancy_outline")
+print("\n".join(" "*7 + line for line in table.splitlines()))        
         

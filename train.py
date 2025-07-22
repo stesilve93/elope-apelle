@@ -11,9 +11,8 @@ from elope.models.emmnetVelGru import MultiModalVelocityEstimator
 from elope.trainers import LunarTrainer
 from elope.utils import LOGGER, load_yaml, increment_path
 
-
 # Path to the yaml file containing the dataset settings
-DATASET_CFG = "cfg/dataset/dataset-5s-hybrid-left-3us.yml"
+DATASET_CFG = "cfg/dataset/dataset-hybrid-1us.yml"
 
 # Path to the yaml file containing the model settings
 MODEL_CFG = "cfg/training/emmnet-v1.yml"
@@ -34,21 +33,27 @@ model_cfg = load_yaml(MODEL_CFG)
 train_loader = ElopeDataLoader(
     DATASET_CFG,
     seq_train, 
+    imu_seq_len=int(model_cfg["imu_sequence_length"]),
+    imu_padding=model_cfg["imu_padding"],
     event_normalization=model_cfg["event_normalization"],
-    augment=False, 
+    augment=True, 
+    flip=0.0,
     batch_size=32,
     shuffle=True, 
     num_workers=8, 
-    rangemeter_noise=0.005, 
-    angles_noise=0.001, 
-    angles_vel_noise=0.001
+    rangemeter_noise=0.000, 
+    angles_noise=0.000, 
+    angles_vel_noise=0.000
 )
 
 val_loader = ElopeDataLoader(
     DATASET_CFG, 
     seq_val, 
+    imu_seq_len=int(model_cfg["imu_sequence_length"]),
+    imu_padding=model_cfg["imu_padding"],
     event_normalization=model_cfg["event_normalization"],
     augment=False,
+    flip=0.0,
     batch_size=32, 
     shuffle=True, 
     num_workers=4
@@ -62,10 +67,7 @@ else:
 LOGGER.info("Model seq2seq: %s", model_cfg["seq2seq"])
 
 # Create the network model 
-model = MultiModalVelocityEstimator.create_model(
-    MODEL_CFG, 
-    device=device, 
-)
+model = MultiModalVelocityEstimator.create_model(MODEL_CFG, device=device, )
 
 # Create the trainer for the model 
 trainer = LunarTrainer(MODEL_CFG, model, train_loader, val_loader, device)
@@ -81,10 +83,6 @@ SAVE_NAME = cfg_weights["name"] + f"_{timestamp}"
 SAVE_PATH = increment_path(Path(cfg_weights["path"]) / SAVE_NAME, exist_ok=False)
 SAVE_PATH.mkdir(parents=True)
 
-# Generate the path for the plots 
-PLOT_PATH = Path("plots") / "training"
-PLOT_PATH.mkdir(parents=True, exist_ok=True)
-
 LOGGER.info(f"Saving training output to {SAVE_PATH} directory.")
 
 # Copy inside the folder the configuration yamls for the dataset and the model 
@@ -92,7 +90,7 @@ shutil.copy(DATASET_CFG, SAVE_PATH / "dataset-cfg.yml")
 shutil.copy(MODEL_CFG, SAVE_PATH / "model-cfg.yml")
 
 # Train the model 
-trainer.train(num_epochs=5, max_patience=30, save_path=SAVE_PATH)
-trainer.plot_training(save_figure=True, path=PLOT_PATH, filename=f"training_{timestamp}")
+trainer.train(num_epochs=100, max_patience=30, save_path=SAVE_PATH)
+trainer.plot_training(save_figure=True, path=SAVE_PATH, filename=f"training.png")
 
 LOGGER.info("Training completed!")

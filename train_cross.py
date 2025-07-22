@@ -16,7 +16,7 @@ from elope.utils import LOGGER, load_yaml, increment_path
 
 
 # Path to the yaml file containing the dataset settings
-DATASET_CFG = "cfg/dataset/dataset-5s-hybrid-left-3us.yml"
+DATASET_CFG = "cfg/dataset/dataset-hybrid-1us.yml"
 
 # Path to the yaml file containing the model settings
 MODEL_CFG = "cfg/training/emmnet-v1.yml"
@@ -66,10 +66,6 @@ SAVE_NAME = cfg_weights["name"] + f"_{timestamp}"
 SAVE_PATH = increment_path(Path(cfg_weights["path"]) / SAVE_NAME, exist_ok=False)
 SAVE_PATH.mkdir(parents=True)
 
-# Generate the folder for the plots 
-PLOT_PATH = increment_path(Path("plots") / "training" / SAVE_NAME, exist_ok=False)
-PLOT_PATH.mkdir(parents=True)
-
 LOGGER.info("Model seq2seq: %s", model_cfg["seq2seq"])
 LOGGER.info(f"Saving cross-training output to {SAVE_PATH} directory.")
 
@@ -94,8 +90,12 @@ for k in range(N_GROUPS):
     train_loader = ElopeDataLoader(
         DATASET_CFG,
         seq_train, 
+        imu_seq_len=int(model_cfg["imu_sequence_length"]),
+        imu_padding=model_cfg["imu_padding"],
         event_normalization=model_cfg["event_normalization"],
-        augment=False, 
+        verbose=False,
+        augment=False,
+        flip=0.0, 
         batch_size=32,
         shuffle=True, 
         num_workers=8, 
@@ -107,8 +107,12 @@ for k in range(N_GROUPS):
     val_loader = ElopeDataLoader(
         DATASET_CFG, 
         seq_val, 
+        imu_seq_len=int(model_cfg["imu_sequence_length"]),
+        imu_padding=model_cfg["imu_padding"],
         event_normalization=model_cfg["event_normalization"],
+        verbose=False,
         augment=False,
+        flip=0.0,
         batch_size=32, 
         shuffle=True, 
         num_workers=4
@@ -121,12 +125,12 @@ for k in range(N_GROUPS):
     model_cfg["weights"]["checkpoint_epochs"] = MAX_EPOCHS + 1
     trainer = LunarTrainer(model_cfg, model, train_loader, val_loader, device)
 
-    save_path_k = SAVE_PATH / f"group-{k}"
-    save_path_k.mkdir(parents=True)
+    path_k = SAVE_PATH / f"group-{k}"
+    path_k.mkdir(parents=True)
 
     # Train the model (skipping the intermediate saving of all single groups)
-    trainer.train(num_epochs=MAX_EPOCHS, max_patience=MAX_EPOCHS_PATIENCE, save_path=save_path_k)
-    trainer.plot_training(save_figure=True, path=PLOT_PATH, filename=f"training_{k}.png")
+    trainer.train(num_epochs=MAX_EPOCHS, max_patience=MAX_EPOCHS_PATIENCE, save_path=path_k)
+    trainer.plot_training(save_figure=True, path=path_k, filename=f"training.png")
     LOGGER.info(f"Training completed for group {k}!")
     
     # Add this statistics to the table
@@ -137,4 +141,7 @@ LOGGER.info("Cross-training statistics:")
 table = tabulate(tab_values, headers=tab_headers, tablefmt="fancy_outline")
 print("\n".join(" "*7 + line for line in table.splitlines()))
 
+# Recover all the validation losses
+val_losses = [val[1] for val in tab_values]
+LOGGER.info(f"The model has a mean validation loss of: {np.mean(val_losses)}.") 
 

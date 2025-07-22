@@ -90,8 +90,8 @@ seq_loader = SequenceLoader(
     event_H=cfg_events["height"],
     event_W=cfg_events["width"],
     event_T=cfg_events["channels"], 
-    imu_seq_len=cfg_dataset["imu_sequence_length"], 
-    imu_padding=cfg_dataset["imu_padding"]
+    imu_seq_len=int(cfg_model["imu_sequence_length"]),
+    imu_padding=cfg_model["imu_padding"]
 )
 
 # Retrieve the type of event normalization 
@@ -126,6 +126,8 @@ for seq_id in sequences:
         
         data_k = seq_loader.get_data_at_time(times[k])
         
+        # Unpack and move to device after adding the batch dimension 
+        tms     = data_k['times'].unsqueeze(0).to(device)
         event_t = data_k['events_tensor'].unsqueeze(0).to(device)
         imu_s   = data_k['imu_sequence'].unsqueeze(0).to(device)
         range_s = data_k['rangemeter_sequence'].unsqueeze(0).to(device)
@@ -145,9 +147,12 @@ for seq_id in sequences:
         if not cfg_model["seq2seq"]: 
             event_t = event_t[:, -1]
         
+        # Normalize the times 
+        tms = tms - tms[..., 0:1]
+        
         with torch.no_grad():
             # Run inference 
-            outputs = model(event_t, imu_s, range_s)
+            outputs = model(tms, event_t, imu_s, range_s)
             # Retrieve the prediction
             pred_k = outputs['prediction']
             
