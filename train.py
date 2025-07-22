@@ -32,7 +32,7 @@ model_cfg = load_yaml(MODEL_CFG)
 # Create the PyTorch's dataloaders
 train_loader = ElopeDataLoader(
     DATASET_CFG,
-    seq_train, 
+    seq_train[:1], 
     imu_seq_len=int(model_cfg["imu_sequence_length"]),
     imu_padding=model_cfg["imu_padding"],
     event_normalization=model_cfg["event_normalization"],
@@ -48,7 +48,7 @@ train_loader = ElopeDataLoader(
 
 val_loader = ElopeDataLoader(
     DATASET_CFG, 
-    seq_val, 
+    seq_val[:1], 
     imu_seq_len=int(model_cfg["imu_sequence_length"]),
     imu_padding=model_cfg["imu_padding"],
     event_normalization=model_cfg["event_normalization"],
