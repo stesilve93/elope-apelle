@@ -295,7 +295,7 @@ class ElopeDataset(Dataset):
         times   = torch.empty(self.imu_seq_len, dtype=torch.float32)
         targets = torch.empty(self.imu_seq_len, 6, dtype=torch.float32) 
         imus    = torch.empty(self.imu_seq_len, 6, dtype=torch.float32) 
-        ranges  = torch.empty(self.imu_seq_len, dtype=torch.float32)
+        ranges  = torch.empty(self.imu_seq_len, 1, dtype=torch.float32)
         
         # Compute the expected shape of the event tensor
         events_shape = (
@@ -323,7 +323,7 @@ class ElopeDataset(Dataset):
             times[k] = sk[0]
             targets[k, :] = sk[1]
             imus[k, :] = sk[2]
-            ranges[k] = sk[3]
+            ranges[k, :] = sk[3]
             
             events[k, :] = sk[4]
         
@@ -338,7 +338,7 @@ class ElopeDataset(Dataset):
             targets[:npads, :] = torch.hstack((s0[1][:3], torch.zeros(3)))
             
             imus[:npads, :] = torch.hstack((s0[2][:3], torch.zeros(3)))
-            ranges[:npads] = s0[3]
+            ranges[:npads, :] = s0[3]
             
             # What happens here depends on the type of encoding
             events[:npads, :] = events[npads]
@@ -370,7 +370,7 @@ class ElopeDataset(Dataset):
         times   = torch.empty(self.imu_seq_len, dtype=torch.float32)
         targets = torch.empty(self.imu_seq_len, 6, dtype=torch.float32) 
         imus    = torch.empty(self.imu_seq_len, 6, dtype=torch.float32) 
-        ranges  = torch.empty(self.imu_seq_len, dtype=torch.float32)
+        ranges  = torch.empty(self.imu_seq_len, 1, dtype=torch.float32)
         
         # Compute the expected shape of the event tensor
         events_shape = (
@@ -398,7 +398,7 @@ class ElopeDataset(Dataset):
             times[k] = sk[0]
             targets[k, :] = sk[1]
             imus[k, :] = sk[2]
-            ranges[k] = sk[3]
+            ranges[k, :] = sk[3]
             
             events[k, :] = sk[5]  
         
@@ -413,7 +413,7 @@ class ElopeDataset(Dataset):
             targets[:npads, :] = torch.hstack((s0[1][:3], torch.zeros(3)))
             
             imus[:npads, :] = torch.hstack((s0[2][:3], torch.zeros(3)))
-            ranges[:npads] = s0[3]
+            ranges[:npads, :] = s0[3]
             
             # What we place here depends on the type of event-encoding 
             events[:npads] = 0.0 
