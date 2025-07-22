@@ -66,10 +66,6 @@ SAVE_NAME = cfg_weights["name"] + f"_{timestamp}"
 SAVE_PATH = increment_path(Path(cfg_weights["path"]) / SAVE_NAME, exist_ok=False)
 SAVE_PATH.mkdir(parents=True)
 
-# Generate the folder for the plots 
-PLOT_PATH = increment_path(Path("plots") / "training" / SAVE_NAME, exist_ok=False)
-PLOT_PATH.mkdir(parents=True)
-
 LOGGER.info("Model seq2seq: %s", model_cfg["seq2seq"])
 LOGGER.info(f"Saving cross-training output to {SAVE_PATH} directory.")
 
@@ -129,12 +125,12 @@ for k in range(N_GROUPS):
     model_cfg["weights"]["checkpoint_epochs"] = MAX_EPOCHS + 1
     trainer = LunarTrainer(model_cfg, model, train_loader, val_loader, device)
 
-    save_path_k = SAVE_PATH / f"group-{k}"
-    save_path_k.mkdir(parents=True)
+    path_k = SAVE_PATH / f"group-{k}"
+    path_k.mkdir(parents=True)
 
     # Train the model (skipping the intermediate saving of all single groups)
-    trainer.train(num_epochs=MAX_EPOCHS, max_patience=MAX_EPOCHS_PATIENCE, save_path=save_path_k)
-    trainer.plot_training(save_figure=True, path=PLOT_PATH, filename=f"training_{k}.png")
+    trainer.train(num_epochs=MAX_EPOCHS, max_patience=MAX_EPOCHS_PATIENCE, save_path=path_k)
+    trainer.plot_training(save_figure=True, path=path_k, filename=f"training.png")
     LOGGER.info(f"Training completed for group {k}!")
     
     # Add this statistics to the table
