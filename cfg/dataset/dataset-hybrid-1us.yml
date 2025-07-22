@@ -1,7 +1,6 @@
 
 # Path to the folder containing the original training data
-# datapath: elope_data/train
-datapath: testseq
+datapath: elope_data/train
 
 # Path to the folder in which to store the cached dataset model
 output_path: dataset/
