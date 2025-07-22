@@ -16,7 +16,7 @@ from elope.utils import LOGGER, load_yaml, increment_path
 
 
 # Path to the yaml file containing the dataset settings
-DATASET_CFG = "cfg/dataset/dataset-5s-hybrid-left-3us.yml"
+DATASET_CFG = "cfg/dataset/dataset-hybrid-1us.yml"
 
 # Path to the yaml file containing the model settings
 MODEL_CFG = "cfg/training/emmnet-v1.yml"
@@ -94,8 +94,12 @@ for k in range(N_GROUPS):
     train_loader = ElopeDataLoader(
         DATASET_CFG,
         seq_train, 
+        imu_seq_len=int(model_cfg["imu_sequence_length"]),
+        imu_padding=model_cfg["imu_padding"],
         event_normalization=model_cfg["event_normalization"],
-        augment=False, 
+        verbose=False,
+        augment=False,
+        flip=0.0, 
         batch_size=32,
         shuffle=True, 
         num_workers=8, 
@@ -107,8 +111,12 @@ for k in range(N_GROUPS):
     val_loader = ElopeDataLoader(
         DATASET_CFG, 
         seq_val, 
+        imu_seq_len=int(model_cfg["imu_sequence_length"]),
+        imu_padding=model_cfg["imu_padding"],
         event_normalization=model_cfg["event_normalization"],
+        verbose=False,
         augment=False,
+        flip=0.0,
         batch_size=32, 
         shuffle=True, 
         num_workers=4

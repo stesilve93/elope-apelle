@@ -45,6 +45,12 @@ all_sequences = [str(i).zfill(4) for i in range(28)]
 seq_train = all_sequences[:20] + ['0023', '0027'] # 80% for training 
 seq_val = all_sequences[20:23] + all_sequences[24:27]    # 20% for validation
 
+# Load the model config 
+model_cfg = load_yaml(MODEL_CFG)
+
+# This script is working only for seq2one models 
+assert model_cfg["seq2seq"] == False
+
 # Load the dataset config and create a Sequence Loader
 dataset_cfg = load_yaml(DATASET_CFG)
 events_cfg = dataset_cfg["events"]
@@ -57,15 +63,10 @@ seq_loader = SequenceLoader(
     event_H=events_cfg["height"],
     event_W=events_cfg["width"],
     event_T=events_cfg["channels"], 
-    imu_seq_len=dataset_cfg["imu_sequence_length"], 
-    imu_padding=dataset_cfg["imu_padding"]
+    imu_seq_len=int(model_cfg["imu_sequence_length"]), 
+    imu_padding=model_cfg["imu_padding"]
 )
 
-# Load the model config 
-model_cfg = load_yaml(MODEL_CFG)
-
-# This script is working only for seq2one models 
-assert model_cfg["seq2seq"] == False
 
 # Retrieve the type of event normalization 
 event_normalization = model_cfg["event_normalization"]
@@ -117,6 +118,7 @@ for seq_id in seq_val:
         data_k = seq_loader.get_data_at_time(seq_loader.timestamps_full[k])
 
         # Unpack and move to device after adding the batch dimension 
+        tms       = data_k['times'].unsqueeze(0).to(device)
         events    = data_k['events_tensor'].unsqueeze(0).to(device)
         imu_seq   = data_k['imu_sequence'].unsqueeze(0).to(device)
         range_seq = data_k['rangemeter_sequence'].unsqueeze(0).to(device)
@@ -140,7 +142,7 @@ for seq_id in seq_val:
         
         with torch.no_grad(): 
             # Run inference and retrieve the predictions 
-            outputs = model(events, imu_seq, range_seq)
+            outputs = model(tms, events, imu_seq, range_seq)
             pred_k = outputs['prediction']
             
         # Store the results 
