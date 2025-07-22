@@ -10,7 +10,7 @@ from tabulate import tabulate
 from elope.datasets import SequenceLoader
 from elope.utils import LOGGER, load_yaml, gridminor, getfiles
 
-MODEL_PATH = Path("weights") / "elope-emmnet-v1-elope_20250721_153832"
+MODEL_PATH = Path("weights") / "elope-emmnet-v1-elope_20250722_070237"
 
 # Path to the yaml file containing the dataset settings
 DATASET_CFG = MODEL_PATH / "dataset-cfg.yml"
@@ -51,7 +51,7 @@ for mode in modes:
         data_path / mode,
         event_integration_window=events_cfg["integration_window"],
         event_encoder_method=events_cfg["encoder_method"],
-        event_clamp=events_cfg.get("clamp", -1)
+        event_clamp=events_cfg.get("clamp", -1),
         event_H=events_cfg["height"],
         event_W=events_cfg["width"],
         event_T=events_cfg["channels"], 
@@ -71,23 +71,16 @@ for mode in modes:
         
         # Save the trajectory states and IMU readings
         seq_loader.load_sequence(seq)
-        seq_loader.preprocess_events(side="left")
-        
         targets, imu, rangemeter = [], [], []
         
-        for k in range(seq_loader.seq_len): 
-            
-            s = seq_loader.get_data_at_time(seq_loader.timestamps_full[k])
-            
-            rangemeter.append(s['rangemeter_sequence'].cpu().numpy()[-1])
-            imu.append(s['imu_sequence'].cpu().numpy()[-1])
-            targets.append(s['ground_truth'].cpu().numpy()[-1])
-
-        # Retrieve all the states
         times = seq_loader.timestamps_full
-        targets = np.array(targets)
-        imu = np.array(imu)
-        rangemeter = np.array(rangemeter).squeeze()
+        targets = np.array(seq_loader.trajectory_full[:, 0:6])
+        imu = np.array(seq_loader.trajectory_full[:, 6:12])
+        rangemeter = np.interp(
+            times, 
+            seq_loader.rangemeter_full[:, 0], 
+            seq_loader.rangemeter_full[:, 1],
+        )
         
         # Store the simulation timestep
         tab_values.append([mode, seq, times[1]-times[0]])
