@@ -347,6 +347,9 @@ class ElopeDataset(Dataset):
                 events[k] = EventProcessor.normalize_tensor(
                     events[k], method=self.event_normalization, max_val=max_val
                 )
+                
+        # Normalize time w.r.t. the beginning of the sequence 
+        times = times - times[0]
         
         if not self.augment: 
             return events, imus, ranges, targets, times
@@ -434,6 +437,9 @@ class ElopeDataset(Dataset):
                     events[k], method=self.event_normalization, max_val=max_val
                 )
                 
+        # Normalize time w.r.t. the beginning of the sequence 
+        times = times - times[0]
+        
         if not self.augment:
             return events, imus, ranges, targets, times 
         
