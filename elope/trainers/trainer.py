@@ -189,8 +189,7 @@ class LunarTrainer:
             self.optimizer.zero_grad()
             
             # Forward pass
-            outputs = self.model(events, imu, rangemeter)
-                
+            outputs = self.model(times, events, imu, rangemeter)
             predictions = outputs['prediction']
             
             # Compute loss
@@ -257,8 +256,7 @@ class LunarTrainer:
                     events = events[:, -1]
                 
                 # Run inference
-                outputs = self.model(events, imu, rangemeter)
-                
+                outputs = self.model(times, events, imu, rangemeter)
                 predictions = outputs['prediction']
                 
                 # Compute the loss 
