@@ -105,7 +105,7 @@ class ElopeDataset(Dataset):
             for seq_id in seq_names:
                 # Retrieve the sequence data
                 seq_data = self.parse_sequence(seq_id)
-                if len(subsamples) > 0: 
+                if seq_data is not None:
                     seq_samples[int(seq_id)] = seq_data
                 
             # Save the cached data 
@@ -124,7 +124,14 @@ class ElopeDataset(Dataset):
          
         LOGGER.info("Dataset creation initialized.")
         for seq_id in self.seq_ids: 
-            subsamples = seq_samples[(int(seq_id))]
+            
+            # Retrieve the sequence options
+            if not int(seq_id) in seq_samples.keys(): 
+                LOGGER.warning(f"Unable to find data for sequence: {seq_id}")
+                continue 
+            
+            # Convert the sequence arrays into dataset subsamples
+            subsamples = self._seq2samples(seq_samples[(int(seq_id))])
             
             # Store the initial sample index of each seq.
             self.seq_indexes_beg.append(len(self.samples)) 
@@ -219,8 +226,9 @@ class ElopeDataset(Dataset):
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         
         # Store the data in a binary pickle file
+        LOGGER.info(f"Saving dataset cache at: \033[33m{cache_path}\033[0m")
         save_pickle(cache_path, (self.hash, seq_samples), compress=True)
-        LOGGER.info(f"Cached dataset at: \033[33m{cache_path}\033[0m")   
+        LOGGER.info(f"Dataset cache saving completed.")
          
     def parse_sequence(self, seq_id: str) -> list:
         """Extract trajectory samples from a sequence trajectory.
@@ -239,7 +247,7 @@ class ElopeDataset(Dataset):
         # Load the full sequence data and get its length
         self.seq_loader.load_sequence(seq_id)
         if self.seq_loader.seq_len == 0: 
-            return []
+            return None
 
         # Retrieve sequence times, rangemeter, IMU and ground-truth data
         times   = self.seq_loader.timestamps_full
@@ -276,10 +284,34 @@ class ElopeDataset(Dataset):
             "times": tms_out, 
             "targets": trg_out, 
             "imu": imu_out, 
-            "rangemter": rng_out, 
+            "rangemeter": rng_out, 
             "events_left": evl_out,
             "events_right": evr_out
         }
+        
+    def _seq2samples(self, seq: dict) -> list:
+        """Convert a dictionary with sequence data into dataset samples.""" 
+        
+        times = seq["times"]
+        targets = seq["targets"]
+        imu = seq["imu"]
+        rangemeter = seq["rangemeter"]
+        events_left = seq["events_left"]
+        events_right = seq["events_right"]
+        
+        ns = len(times)
+        samples = []
+        for k in range(ns): 
+            samples.append((
+                times[k], 
+                targets[k], 
+                imu[k], 
+                rangemeter[k], 
+                events_left[k], 
+                events_right[k]
+            ))
+            
+        return samples
     
     def __len__(self) -> int: 
         return len(self.samples)
