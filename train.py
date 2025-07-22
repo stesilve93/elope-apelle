@@ -32,23 +32,23 @@ model_cfg = load_yaml(MODEL_CFG)
 # Create the PyTorch's dataloaders
 train_loader = ElopeDataLoader(
     DATASET_CFG,
-    seq_train[:1], 
+    seq_train, 
     imu_seq_len=int(model_cfg["imu_sequence_length"]),
     imu_padding=model_cfg["imu_padding"],
     event_normalization=model_cfg["event_normalization"],
-    augment=False, 
+    augment=True, 
     flip=0.0,
     batch_size=32,
     shuffle=True, 
     num_workers=8, 
-    rangemeter_noise=0.005, 
-    angles_noise=0.001, 
-    angles_vel_noise=0.001
+    rangemeter_noise=0.000, 
+    angles_noise=0.000, 
+    angles_vel_noise=0.000
 )
 
 val_loader = ElopeDataLoader(
     DATASET_CFG, 
-    seq_val[:1], 
+    seq_val, 
     imu_seq_len=int(model_cfg["imu_sequence_length"]),
     imu_padding=model_cfg["imu_padding"],
     event_normalization=model_cfg["event_normalization"],
@@ -83,10 +83,6 @@ SAVE_NAME = cfg_weights["name"] + f"_{timestamp}"
 SAVE_PATH = increment_path(Path(cfg_weights["path"]) / SAVE_NAME, exist_ok=False)
 SAVE_PATH.mkdir(parents=True)
 
-# Generate the path for the plots 
-PLOT_PATH = Path("plots") / "training"
-PLOT_PATH.mkdir(parents=True, exist_ok=True)
-
 LOGGER.info(f"Saving training output to {SAVE_PATH} directory.")
 
 # Copy inside the folder the configuration yamls for the dataset and the model 
@@ -94,7 +90,7 @@ shutil.copy(DATASET_CFG, SAVE_PATH / "dataset-cfg.yml")
 shutil.copy(MODEL_CFG, SAVE_PATH / "model-cfg.yml")
 
 # Train the model 
-trainer.train(num_epochs=5, max_patience=30, save_path=SAVE_PATH)
-trainer.plot_training(save_figure=True, path=PLOT_PATH, filename=f"training_{timestamp}")
+trainer.train(num_epochs=100, max_patience=30, save_path=SAVE_PATH)
+trainer.plot_training(save_figure=True, path=SAVE_PATH, filename=f"training.png")
 
 LOGGER.info("Training completed!")
