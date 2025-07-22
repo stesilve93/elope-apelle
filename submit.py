@@ -147,6 +147,9 @@ for seq_id in sequences:
         if not cfg_model["seq2seq"]: 
             event_t = event_t[:, -1]
         
+        # Normalize the times 
+        tms = tms - tms[..., 0:1]
+        
         with torch.no_grad():
             # Run inference 
             outputs = model(tms, event_t, imu_s, range_s)

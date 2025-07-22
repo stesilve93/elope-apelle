@@ -19,7 +19,7 @@ from elope.utils import (
     compute_posvelz,
 )
 
-MODEL_PATH = Path("weights") / "elope-emmnet-v1-elope_20250721_153832"
+MODEL_PATH = Path("weights") / "elope-emmnet-v1_20250722_064745"
 
 # Path to the yaml file containing the dataset settings
 DATASET_CFG = MODEL_PATH / "dataset-cfg.yml"
@@ -142,6 +142,9 @@ for seq_id in seq_val:
         if not model_cfg["seq2seq"]: 
             events = events[:, -1]
             states = states[:, -1]
+        
+        # Normalize the times 
+        tms = tms - tms[..., 0:1]
         
         with torch.no_grad(): 
             # Run inference and retrieve the predictions 
