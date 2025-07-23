@@ -37,8 +37,7 @@ class LunarTrainer:
         
         # Store the configuration for the model
         self.cfg = model_cfg 
-        self.velocity_only = bool(self.cfg["velocity_only"])
-
+        
         # Store the network model and hardware device 
         self.model = model
         self.device = device
@@ -50,8 +49,16 @@ class LunarTrainer:
         # Store the name of the metric used to identify the best model 
         self.val_metric_key = val_metric
         
-        # Check whether the model is sequence to sequence.
-        self.seq2seq = bool(self.cfg["seq2seq"])
+        # Retrieve which state the model gives in output 
+        self.output_type = self.cfg["output_type"]
+        assert self.output_type in (
+            "initial_state", "final_state", "central_state", "sequence"
+        )
+        
+        # Retrieve the sequence length
+        self.seq_len = int(self.cfg["imu_sequence_length"])
+        if self.output_type == "central_state": 
+            assert self.seq_len % 2 == 1
         
         # Retrieve the loss weights
         cfg_losses = self.cfg["losses"]
@@ -72,15 +79,19 @@ class LunarTrainer:
     def weighted_pose_loss(self, predictions: torch.Tensor, targets: torch.Tensor) -> dict:
         """Compute weighted loss for position and velocity components."""
         
-        if not self.seq2seq: 
-            # If we are only predicting the final state, retrieve only that part.
-            targets = targets[:, -1] # B, 6 else: (B, T, 6)
+        # Check which output we need to retrieve 
+        if self.output_type == "initial_state":
+            targets = targets[..., 0]               # (B, 6)
+        elif self.output_type == "final_state": 
+            targets = targets[..., -1]              # (B, 6)
+        elif self.output_type == "central_state": 
+            targets = targets[..., self.seq_len // 2]
             
         pos_target = targets[..., 0:3]
         vel_target = targets[..., 3:6]
 
         # Retrieve the predicted velocities
-        vel_pred = predictions[..., 0:3] if self.velocity_only else predictions[..., 3:6]
+        vel_pred = predictions[..., 0.3]
         
         # Assemble the global loss function
         total_loss = torch.tensor(0.0, requires_grad=True).to(targets)
@@ -181,11 +192,7 @@ class LunarTrainer:
             rangemeter = rangemeter.to(self.device)
             events = events.to(self.device)
             imu = imu.to(self.device)
-            
-            if not self.seq2seq: 
-                # Keep only the events closest to the state to be predicted
-                events = events[:, -1]
-            
+
             self.optimizer.zero_grad()
             
             # Forward pass
@@ -251,10 +258,6 @@ class LunarTrainer:
                 events = events.to(self.device)
                 imu = imu.to(self.device)
                 
-                if not self.seq2seq: 
-                    # Keep only the events closest to the state to be predicted
-                    events = events[:, -1]
-                
                 # Run inference
                 outputs = self.model(times, events, imu, rangemeter)
                 predictions = outputs['prediction']
@@ -268,10 +271,14 @@ class LunarTrainer:
                 running_mse_abs_loss += loss_dict['vel_mse_abs_loss'].item()
                 running_mse_rel_loss += loss_dict['vel_mse_rel_loss'].item()
                 
-                # Check whether we only care about the last target state 
-                if not self.seq2seq: 
-                    targets = targets[:, -1]
-            
+                # Check which output we need to retrieve 
+                if self.output_type == "initial_state":
+                    targets = targets[..., 0]               # (B, 6)
+                elif self.output_type == "final_state": 
+                    targets = targets[..., -1]              # (B, 6)
+                elif self.output_type == "central_state": 
+                    targets = targets[..., self.seq_len // 2]
+                    
                 all_predictions.append(predictions.cpu())
                 all_targets.append(targets.cpu())
                 
