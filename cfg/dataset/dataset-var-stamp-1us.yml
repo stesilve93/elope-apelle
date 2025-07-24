@@ -5,7 +5,7 @@ datapath: elope_data/train
 # Path to the folder in which to store the cached dataset model
 output_path: dataset/
 # Name prefix of the dataset
-output_name: dataset-stamp-1us
+output_name: dataset-var-stamp-1us
 
 # If true, once the dataset has been loaded, it will be saved to the output directory 
 # written above
