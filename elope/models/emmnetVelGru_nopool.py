@@ -482,7 +482,7 @@ class EventEncoder(nn.Module):
         # This reshapes each (polarity, event_features, width, height) slice
         # into (polarity * event_features, width, height) to use Conv3D properly
         # (B, T, polarity * event_features, width, height)
-        x_reshaped = x.view(x.shape[0], x.shape[1], 
+        x_reshaped = x.reshape(x.shape[0], x.shape[1], 
                                 x.shape[2] * x.shape[3], 
                                 x.shape[4], x.shape[5])
 
