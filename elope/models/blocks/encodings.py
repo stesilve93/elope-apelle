@@ -64,9 +64,9 @@ class lPE(nn.Module):
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity() 
         
         # Create the embedding vector
-        self.pe = nn.Parameter(torch.empty(max_len, d_model))
-        nn.init.uniform_(self.pe, -0.02, 0.02)
-        self.pe = self.pe.unsqueeze(0)
+        pe = nn.Parameter(torch.empty(max_len, d_model))
+        nn.init.uniform_(pe, -0.02, 0.02)
+        self.pe = pe.unsqueeze(0)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor: 
         

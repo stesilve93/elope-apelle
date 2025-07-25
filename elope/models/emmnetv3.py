@@ -240,24 +240,28 @@ class MultiModalTransformerEstimator(nn.Module):
         imu_channels: list = [64, 64, 32],
         resnet: str = "resnet-18",
         dropout: float = 0.1,
+        stack_time: bool = True,
     ):
 
         super().__init__()
         
+        self.stack_time = stack_time
+        t_dim = 1 if self.stack_time else 0
+        
         # Initialise the BaseEmbedding block for the rangemeter data 
         self.proj_range = BaseEmbedding(
-            input_dim = 2, 
+            input_dim = 1 + t_dim, 
             hidden_dim = range_channels, 
-            activation = nn.SiLU(),
+            activation = nn.GELU(),
             norm = False, 
             dropout = dropout
         )
         
         # Initialise the BaseEmbedding block for the IMU data 
         self.proj_imu = BaseEmbedding(
-            input_dim = 7, 
+            input_dim = 6 + t_dim, 
             hidden_dim = imu_channels,
-            activation = nn.SiLU(),
+            activation = nn.GELU(),
             norm = False, 
             dropout = dropout
         )
@@ -269,21 +273,22 @@ class MultiModalTransformerEstimator(nn.Module):
         
         # Total size of the sequence entering the transformer
         token_size = range_channels[-1] + imu_channels[-1] + event_output_dim
-        transformer_out_dim = 512
+        transformer_out_dim = token_size
         
         self.transformer = SequenceTransfomer(
             sequence_len = sequence_length, 
             input_dim = token_size,
             output_dim = transformer_out_dim,
             dropout = dropout,
-            encoding = "tAPE",
+            encoding = "lPE",
+            n_heads = 4,
         )
         
         self.regressor_head = VelocityRegressor(
             input_dim = transformer_out_dim,
             output_dim = 3,
             hidden_dim=[128, 64],
-            activation=nn.SiLU(), 
+            activation=nn.GELU(), 
             norm=False, 
             dropout = dropout,
         )
@@ -315,6 +320,7 @@ class MultiModalTransformerEstimator(nn.Module):
             range_channels=cfg_arch["range_channels"], 
             imu_channels=cfg_arch["imu_channels"],
             dropout=float(cfg["dropout"]), 
+            stack_time=bool(cfg_arch["stack_time"]),
             **kwargs
         )
         
@@ -358,17 +364,20 @@ class MultiModalTransformerEstimator(nn.Module):
         # Adjust times dimension
         times = times.unsqueeze(2)  # (B, T, 1)
 
-        # Compute the timesteps 
-        time_step = torch.diff(times, dim=1)
-        time_step = torch.cat((time_step, time_step[:, 0].unsqueeze(1)), dim=1) # (B, T, 1)
+        if self.stack_time:
+            
+            # Compute the timesteps 
+            time_step = torch.diff(times, dim=1)
+            time_step = torch.cat((time_step, time_step[:, 0].unsqueeze(1)), dim=1) # (B, T, 1)
 
-        # Stack the timestep to the rangemeter data 
-        tensor_ext_range = torch.cat([tensor_range, time_step], dim=-1)  # (B, T, 2)
-        # print("Range: ", tensor_ext_range.shape, tensor_ext_range.device)
+            # Stack the timestep to the rangemeter data 
+            tensor_range = torch.cat([tensor_range, time_step], dim=-1)  # (B, T, 2)
 
-        # Stack the timestep to the IMU data 
-        tensor_ext_imu = torch.cat([tensor_imu, time_step], dim=-1) # (B, T, 7)
-        # print("IMU: ", tensor_ext_imu.shape, tensor_ext_imu.device)
+            # Stack the timestep to the IMU data 
+            tensor_imu = torch.cat([tensor_imu, time_step], dim=-1)      # (B, T, 7)
+            
+        # print("Range: ", tensor_range.shape)
+        # print("IMU: ", tensor_imu.shape)
         
         # Reshape the event tensor to be (B, T, C, H, W)
         B, T, _, _, H, W = tensor_event.shape
@@ -376,11 +385,11 @@ class MultiModalTransformerEstimator(nn.Module):
         # print("Events:", tensor_event.shape, tensor_event.device)
                 
         # Compute the range embeddings
-        feat_range = self.proj_range(tensor_ext_range) # (B, T, 8)
+        feat_range = self.proj_range(tensor_range) # (B, T, 8)
         # print("Feat range:" , feat_range.shape)
         
         # Compute the IMU embeddings 
-        feat_imu = self.proj_imu(tensor_ext_imu) # (B, T, 32)
+        feat_imu = self.proj_imu(tensor_imu) # (B, T, 32)
         # print("Feat IMU:", feat_imu.shape)
         
         # Pass the event through the encoder and retrieve the feature vector. 

@@ -16,17 +16,17 @@ weights:
 padding: static 
 
 # Length of the IMU sequence
-sequence_length: 5
+sequence_length: 20
 
 # Type of output, either "initial_state", "final_state", "central_state" or "sequence".
 output_type: final_state
 
 # Type of normalization for the event tensor. Supported values are "null", "standard", 
 # or "minmax".
-event_normalization: "null"
+event_normalization: "standard"
 
 # Dropout fraction for the model
-dropout: 0.01
+dropout: 0.10
 
 # Network architecture 
 architecture: 
@@ -35,13 +35,16 @@ architecture:
   resnet_model: resnet-18 
 
   # Hidden dimensions for the range embedding
-  range_channels: [32, 8]
+  range_channels: [16, 8]
 
   # Hidden dimensions for the IMU embedder
-  imu_channels: [64, 64, 32]
+  imu_channels: [32, 16]
 
   # Length of the event feature vector
-  event_output_dim: 256
+  event_output_dim: 128
+
+  # True if the timesteps should be stacked to the range and IMU tensors
+  stack_time: False
 
 # Training losses settings
 losses:
