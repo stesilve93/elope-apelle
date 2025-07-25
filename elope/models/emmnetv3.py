@@ -35,7 +35,7 @@ class BaseEmbedding(nn.Module):
         c1 = input_dim
         
         # Add FC layer
-        self.layers = []
+        self.layers = nn.ModuleList()
         for k in range(num_layers): 
             
             # Update the channel dimension 
@@ -195,7 +195,7 @@ class VelocityRegressor(nn.Module):
         c1 = input_dim
         
         # Add the FC layers 
-        self.layers = []
+        self.layers = nn.ModuleList()
         for k in range(num_layers): 
             
             # Update the channel dimension 
@@ -304,14 +304,16 @@ class MultiModalTransformerEstimator(nn.Module):
         if isinstance(cfg, (str, Path)): 
             cfg = load_yaml(cfg)
             
+        assert cfg["output_type"] == "final_state"
+            
         cfg_arch = cfg["architecture"]
-        
         model = MultiModalTransformerEstimator(
+            sequence_length=int(cfg["sequence_length"]),
             resnet=cfg_arch["resnet_model"], 
-            event_channels=event_channels, 
+            event_channels=2 * event_channels, # Include both polarities
             event_output_dim=int(cfg_arch["event_output_dim"]),
-            range_channels=int(cfg_arch["range_channels"]), 
-            imu_channels=int(cfg_arch["imu_channels"]),
+            range_channels=cfg_arch["range_channels"], 
+            imu_channels=cfg_arch["imu_channels"],
             dropout=float(cfg["dropout"]), 
             **kwargs
         )
@@ -349,45 +351,53 @@ class MultiModalTransformerEstimator(nn.Module):
     ) -> dict:
         
         # Times is a tensor of size (B, T)
-        # Event is a tensor of size (B, T, 2, H, W, C)
+        # Event is a tensor of size (B, T, 2, C, H, W)
         # IMU is a tensor of size (B, T, 6)
         # Rangemeter is a tensor of size (B, T, 1)
         
         # Adjust times dimension
         times = times.unsqueeze(2)  # (B, T, 1)
-        
+
         # Compute the timesteps 
         time_step = torch.diff(times, dim=1)
         time_step = torch.cat((time_step, time_step[:, 0].unsqueeze(1)), dim=1) # (B, T, 1)
 
         # Stack the timestep to the rangemeter data 
-        tensor_ext_range = torch.cat((tensor_range, time_step))  # (B, T, 2)
+        tensor_ext_range = torch.cat([tensor_range, time_step], dim=-1)  # (B, T, 2)
+        # print("Range: ", tensor_ext_range.shape, tensor_ext_range.device)
 
         # Stack the timestep to the IMU data 
-        tensor_ext_imu = torch.cat((tensor_imu, time_step)) # (B, T, 7)
+        tensor_ext_imu = torch.cat([tensor_imu, time_step], dim=-1) # (B, T, 7)
+        # print("IMU: ", tensor_ext_imu.shape, tensor_ext_imu.device)
         
         # Reshape the event tensor to be (B, T, C, H, W)
-        B, T, _, H, W, _ = tensor_event.shape
-        tensor_event = tensor_event.permute(0, 1, 2, 5, 3, 4) # (B, T, 2, C, H, W)
-        tensor_event.reshape(B, T, -1, H, W) 
-        
+        B, T, _, _, H, W = tensor_event.shape
+        tensor_event = tensor_event.reshape(B, T, -1, H, W) 
+        # print("Events:", tensor_event.shape, tensor_event.device)
+                
         # Compute the range embeddings
         feat_range = self.proj_range(tensor_ext_range) # (B, T, 8)
+        # print("Feat range:" , feat_range.shape)
         
         # Compute the IMU embeddings 
         feat_imu = self.proj_imu(tensor_ext_imu) # (B, T, 32)
+        # print("Feat IMU:", feat_imu.shape)
         
         # Pass the event through the encoder and retrieve the feature vector. 
         feat_events = self.encoder_event(tensor_event) # (B, T, N)
+        # print("Feat events: ", feat_events.shape)
         
         # Stack all the features according to their time-state 
         features = torch.cat([feat_range, feat_imu, feat_events], dim=-1)   # (B, T, F)
+        # print("Stacked features: ", features.shape)
         
         # Pass the features through the transformer 
         features = self.transformer(features)   # (B, M)
+        # print("Transformer output: ", features.shape)
         
         # Apply the final velocity regressor
         output = self.regressor_head(features)
+        # print("Final output: ", output.shape)
         
         return {
             'prediction': output,

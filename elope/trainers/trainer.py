@@ -81,11 +81,11 @@ class LunarTrainer:
         
         # Check which output we need to retrieve 
         if self.output_type == "initial_state":
-            targets = targets[..., 0]               # (B, 6)
+            targets = targets[:, 0]               # (B, 6)
         elif self.output_type == "final_state": 
-            targets = targets[..., -1]              # (B, 6)
+            targets = targets[:, -1]              # (B, 6)
         elif self.output_type == "central_state": 
-            targets = targets[..., self.seq_len // 2]
+            targets = targets[:, self.seq_len // 2]
             
         pos_target = targets[..., 0:3]
         vel_target = targets[..., 3:6]
@@ -273,11 +273,11 @@ class LunarTrainer:
                 
                 # Check which output we need to retrieve 
                 if self.output_type == "initial_state":
-                    targets = targets[..., 0]               # (B, 6)
+                    targets = targets[:, 0]               # (B, 6)
                 elif self.output_type == "final_state": 
-                    targets = targets[..., -1]              # (B, 6)
+                    targets = targets[:, -1]              # (B, 6)
                 elif self.output_type == "central_state": 
-                    targets = targets[..., self.seq_len // 2]
+                    targets = targets[:, self.seq_len // 2]
                     
                 all_predictions.append(predictions.cpu())
                 all_targets.append(targets.cpu())

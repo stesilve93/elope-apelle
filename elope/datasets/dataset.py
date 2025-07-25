@@ -323,7 +323,7 @@ class ElopeDataset(Dataset):
         """Retrieve a forward sequence at at given dataset index."""
     
         # Retrieve tensor sizes 
-        ni = self.imu_seq_len 
+        ni = self.sample_len 
         T, H, W = self.seq_loader.T, self.seq_loader.H, self.seq_loader.W
         
         # Initialize all the arrays 
@@ -343,12 +343,12 @@ class ElopeDataset(Dataset):
         idx_rel = idx - idx_beg
         
         # Compute the number of padding values we need to add at the beginning    
-        npads = max(0, self.imu_seq_len - 1 - idx_rel)
+        npads = max(0, ni - 1 - idx_rel)
         
         # Fill the part of the sequence that is available
-        for k in range(npads, self.imu_seq_len): 
+        for k in range(npads, ni): 
             
-            sk = self.samples[idx-self.imu_seq_len+k+1]
+            sk = self.samples[idx-ni+k+1]
             
             times[k] = sk[0]
             targets[k, :] = sk[1]
@@ -396,7 +396,7 @@ class ElopeDataset(Dataset):
         """Retrieve a backward sequence at a given dataset index."""
         
         # Retrieve tensor sizes 
-        ni = self.imu_seq_len 
+        ni = self.sample_len 
         T, H, W = self.seq_loader.T, self.seq_loader.H, self.seq_loader.W
         
         # Initialize all the arrays 
@@ -416,12 +416,12 @@ class ElopeDataset(Dataset):
         idx_rel = idx_beg - idx
         
         # Compute the number of padding values we need to add at the beginning    
-        npads = max(0, self.imu_seq_len - 1 - idx_rel)
+        npads = max(0, ni - 1 - idx_rel)
         
         # Fill the part of the sequence that is available
-        for k in range(npads, self.imu_seq_len): 
+        for k in range(npads, ni): 
             
-            sk = self.samples[idx+self.imu_seq_len-k-1]
+            sk = self.samples[idx+ni-k-1]
         
             times[k] = sk[0]
             targets[k, :] = sk[1]

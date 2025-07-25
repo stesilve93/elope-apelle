@@ -26,7 +26,7 @@ output_type: final_state
 event_normalization: "null"
 
 # Dropout fraction for the model
-dropout: 0.05
+dropout: 0.01
 
 # Network architecture 
 architecture: 
