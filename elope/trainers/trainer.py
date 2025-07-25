@@ -56,7 +56,7 @@ class LunarTrainer:
         )
         
         # Retrieve the sequence length
-        self.seq_len = int(self.cfg["imu_sequence_length"])
+        self.seq_len = int(self.cfg["sequence_length"])
         if self.output_type == "central_state": 
             assert self.seq_len % 2 == 1
         
@@ -91,7 +91,7 @@ class LunarTrainer:
         vel_target = targets[..., 3:6]
 
         # Retrieve the predicted velocities
-        vel_pred = predictions[..., 0.3]
+        vel_pred = predictions[..., 0:3]
         
         # Assemble the global loss function
         total_loss = torch.tensor(0.0, requires_grad=True).to(targets)
