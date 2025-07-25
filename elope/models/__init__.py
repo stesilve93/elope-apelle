@@ -26,8 +26,8 @@ def build_model(
     else: 
         
         if cfg_model.get("use_nopool", False): 
-            return MultiModalVelocityEstimator.create_model(cfg_model, device)
+            return MultiModalVelocityEstimatorNoPool.create_model(cfg_model, device)
         
         else: 
-            return MultiModalVelocityEstimatorNoPool.create_model(cfg_model, device)
+            return MultiModalVelocityEstimator.create_model(cfg_model, device)
 
