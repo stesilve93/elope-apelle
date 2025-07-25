@@ -5,7 +5,7 @@ weights:
   path: weights
 
   # Name of the model
-  name: elope-emmnet-v3
+  name: setnet-v1
 
   # Specify every how many epochs the model weights should be saved.
   checkpoint_epochs: 10

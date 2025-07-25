@@ -986,7 +986,12 @@ class MultiModalVelocityEstimatorNoPool(nn.Module):
         self._init_weights()
     
     @staticmethod 
-    def create_model(cfg: str | Path | dict, device: str="cpu", **kwargs):
+    def create_model(
+        cfg: str | Path | dict, 
+        event_channels: int, 
+        device: str="cpu", 
+        **kwargs
+    ):
         """Factory function to create the improved model"""
         
         # Retrieve the model configuration
@@ -994,6 +999,7 @@ class MultiModalVelocityEstimatorNoPool(nn.Module):
             cfg = load_yaml(cfg)
         
         model = MultiModalVelocityEstimatorNoPool(
+            event_channels= 2 * int(event_channels), # Include both polarities
             use_attention=bool(cfg["use_attention"]), 
             dropout=float(cfg["dropout"]),
             use_physics_aware=bool(cfg["physics_aware"], 

@@ -18,7 +18,7 @@ from elope.utils import (
     compute_posvelz,
 )
 
-MODEL_PATH = Path("weights") / "test"
+MODEL_PATH = Path("weights") / "elope-emmnet-v1_20250725_104838"
 
 # Path to the yaml file containing the dataset settings
 DATASET_CFG = MODEL_PATH / "dataset-cfg.yml"
@@ -41,8 +41,10 @@ LOGGER.info(f"Using device: {device}\n")
 
 # Split the sequences between train/val 
 all_sequences = [str(i).zfill(4) for i in range(28)]
-seq_train = all_sequences[:20] + ['0023', '0027'] # 80% for training 
-seq_val = all_sequences[20:23] + all_sequences[24:27]    # 20% for validation
+# seq_train = all_sequences[:20] + ['0023', '0027'] # 80% for training 
+# seq_val = all_sequences[20:23] + all_sequences[24:27]    # 20% for validation
+seq_train = all_sequences[:22] # 80% for training 
+seq_val = all_sequences[22:]   # 20% for validation
 
 # Load the model config and dataset configs
 model_cfg = load_yaml(MODEL_CFG)

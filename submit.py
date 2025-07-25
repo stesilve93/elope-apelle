@@ -19,7 +19,7 @@ from elope.utils import (
     compute_posvelz
 )
 
-SUBMISSION_NAME = "elope-emmnet-v1-elope_20250721_153832"
+SUBMISSION_NAME = "elope-emmnet-v1_20250725_104838"
 
 MODEL_PATH = Path("weights") / SUBMISSION_NAME
 
@@ -113,14 +113,14 @@ seq_loader = seq_cls(
 )
 
 # Retrieve the starting index 
-idx_beg = seq_loader.imu_seq_len - 1
+idx_beg = seq_loader.out_len - 1
 
 bogus = dict()
 for seq_id in sequences: 
 
     # Load the sequence
     LOGGER.info(f"Loading test sequence: {seq_id}")
-    seq_loader.load_sequence(seq_id, events_side="left")
+    seq_loader.load_sequence(seq_id, events_side="left", test=True)
     
     # Store the velocities and their timestamps
     times, velocities = [], []

@@ -5,7 +5,7 @@ weights:
   path: weights
 
   # Name of the model
-  name: elope-emmnet-v1
+  name: elope-emmnet-v3-nopool
 
   # Specify every how many epochs the model weights should be saved.
   checkpoint_epochs: 10
@@ -16,7 +16,7 @@ weights:
 padding: static 
 
 # Length of the states sequence
-sequence_length: 10
+sequence_length: 20
 
 # Type of normalization for the event tensor. Supported values are "null", "standard", 
 # or "minmax".
