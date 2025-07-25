@@ -1,17 +1,13 @@
 
-import math
-
-import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from pathlib import Path
 
 from elope.utils import load_yaml
 
-from .blocks import ResNet, ResNet18, ResNet34
-from .blocks import vAPE, tAPE, lPE
+from ..blocks import ResNet, ResNet18, ResNet34
+from ..blocks import vAPE, tAPE, lPE
 
 class BaseEmbedding(nn.Module): 
     """Base MLP layer for basic feature expansion.""" 
@@ -115,6 +111,7 @@ class SequenceTransfomer(nn.Module):
     
     def __init__(
         self, 
+        output_type: str,
         sequence_len: int,
         input_dim: int, 
         output_dim: int, 
@@ -127,6 +124,10 @@ class SequenceTransfomer(nn.Module):
         
         # Sequence length is the number of "states" (i.e., timesteps). `input_dim` is 
         # the size of the feature vector at each timestep.
+        
+        # Check what type of output should be provided 
+        assert output_type in ("last_state", "sequence")
+        self.output_type = output_type
         
         # Create the positional encoding 
         assert encoding in ("vAPE", "tAPE", "lPE")
@@ -167,8 +168,9 @@ class SequenceTransfomer(nn.Module):
         # Apply the transformer 
         x = self.transformer(x)    # (B, T, D)
         
-        # Extract the features associated to the last state 
-        x = x[:, -1]    # (B, D)
+        if self.output_type == "last_state":
+            # Extract the features associated to the last state 
+            x = x[:, -1]    # (B, D)
         
         # Final projection 
         x = self.output_proj(x) # (B, D)
@@ -228,11 +230,12 @@ class VelocityRegressor(nn.Module):
         return out
         
 
-class MultiModalTransformerEstimator(nn.Module):
+class SETNetV1(nn.Module):
     """ Multi-modal transformer-based network with better regularization."""
     
     def __init__(
         self, 
+        output_type: str, 
         sequence_length: int,
         event_channels: int, 
         event_output_dim: int = 256,
@@ -245,6 +248,11 @@ class MultiModalTransformerEstimator(nn.Module):
 
         super().__init__()
         
+        # Check what type of output should be given by the network 
+        assert output_type in ("last_state", "sequence")
+        self.output_type = output_type
+        
+        # Check whether time should be stacked in the embeddings
         self.stack_time = stack_time
         t_dim = 1 if self.stack_time else 0
         
@@ -276,6 +284,7 @@ class MultiModalTransformerEstimator(nn.Module):
         transformer_out_dim = token_size
         
         self.transformer = SequenceTransfomer(
+            output_type = output_type,
             sequence_len = sequence_length, 
             input_dim = token_size,
             output_dim = transformer_out_dim,
@@ -312,7 +321,8 @@ class MultiModalTransformerEstimator(nn.Module):
         assert cfg["output_type"] == "final_state"
             
         cfg_arch = cfg["architecture"]
-        model = MultiModalTransformerEstimator(
+        model = SETNetV1(
+            output_type=cfg["output_type"],
             sequence_length=int(cfg["sequence_length"]),
             resnet=cfg_arch["resnet_model"], 
             event_channels=2 * event_channels, # Include both polarities

@@ -9,8 +9,7 @@ from pathlib import Path
 from scipy.interpolate import PchipInterpolator
 
 from elope.datasets import EventProcessor, VariableSequenceLoader, FixedSequenceLoader
-from elope.models.emmnetVelGru import MultiModalVelocityEstimator
-from elope.models.emmnetVelGru_s2s import MultiModalVelocityEstimatorS2S
+from elope.models import build_model
 from elope.utils import (
     LOGGER, 
     getfiles, 
@@ -46,30 +45,23 @@ OUTPUT_ANALYTICAL_VZ = True
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
 LOGGER.info(f"Using device: {device}")
 
-# Load the configurationf for the model
+# Load the configurations for the model and dataset
 model_cfg = load_yaml(MODEL_CFG)
+dataset_cfg = load_yaml(DATASET_CFG)
 
 # Check the model outputs only positions 
 assert model_cfg.get("velocity_only", True) == True
 
 # Retrieve the type of model 
 out_type = model_cfg["output_type"]
-assert out_type in ("initial_state", "final_state", "central_state")
+assert out_type in ("initial_state", "final_state", "central_state", "sequence")
 
 # Retrieve the type of event normalization 
 event_normalization = model_cfg["event_normalization"]
 
-LOGGER.info(f"Model type: {out_type}")
-if model_cfg["output_type"] == "sequence": 
-    model_cls = MultiModalVelocityEstimatorS2S
-else: 
-    model_cls = MultiModalVelocityEstimator
-    
 # Create the network model
-model = model_cls.create_model(model_cfg, device=device)
-
-# Create the model 
-model = MultiModalVelocityEstimator.create_model(model_cfg, device=device)
+model = build_model(model_cfg, dataset_cfg, device=device)
+LOGGER.info(f"Model type: {type(model)}")
 
 # Load the model weights 
 if WEIGHTS_PATH.exists(): 
@@ -166,8 +158,11 @@ for seq_id in sequences:
             tms = tms[:, 0]
         elif out_type == "final_state": 
             tms = tms[:, -1]
-        else: 
+        elif out_type == "central_state":
             tms = tms[:, seq_loader.seq_len // 2]
+        elif out_type == "sequence":
+            tms = tms[:, -1]
+            pred_k = pred_k[:, -1]
             
         # Store the predicted velocity at this timing
         times.append(tms.cpu().numpy().squeeze())

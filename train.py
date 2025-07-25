@@ -7,9 +7,7 @@ import torch
 from pathlib import Path 
 
 from elope.datasets import ElopeDataLoader
-from elope.models.emmnetv3 import MultiModalTransformerEstimator
-from elope.models.emmnetVelGru import MultiModalVelocityEstimator
-from elope.models.emmnetVelGru_s2s import MultiModalVelocityEstimatorS2S
+from elope.models import build_model
 from elope.trainers import LunarTrainer
 from elope.utils import LOGGER, load_yaml, increment_path
 
@@ -30,8 +28,9 @@ all_sequences = [str(i).zfill(4) for i in range(28)]
 seq_train = all_sequences[:22] # 80% for training 
 seq_val = all_sequences[22:]   # 20% for validation
 
-# Load the model config.
+# Load the model and dataset config 
 model_cfg = load_yaml(MODEL_CFG)
+dataset_cfg = load_yaml(DATASET_CFG)
 
 # Retrieve the dataset configs 
 sequence_length = int(model_cfg["sequence_length"])
@@ -70,19 +69,8 @@ val_loader = ElopeDataLoader(
 
 # Create the model 
 out_type = model_cfg["output_type"]
-LOGGER.info(f"Model type: {out_type}")
-if model_cfg["output_type"] == "sequence": 
-    model = MultiModalVelocityEstimatorS2S.create_model(MODEL_CFG, device=device)
-else: 
-    if "architecture" in model_cfg.keys(): 
-        model = MultiModalTransformerEstimator.create_model(
-            MODEL_CFG, 
-            event_channels=train_loader.dataset.seq_loader.T,
-            device=device,
-        )
-        
-    else:
-        model = MultiModalVelocityEstimator.create_model(MODEL_CFG, device=device)
+model = build_model(model_cfg, dataset_cfg, device=device)
+LOGGER.info(f"Model type: {type(model)}")
 
 # Create the trainer for the model 
 trainer = LunarTrainer(MODEL_CFG, model, train_loader, val_loader, device)

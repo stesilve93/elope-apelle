@@ -8,9 +8,8 @@ import torch
 from pathlib import Path 
 from tabulate import tabulate
 
-from elope.datasets import ElopeDataLoader
-from elope.models.emmnetVelGru import MultiModalVelocityEstimator
-from elope.models.emmnetVelGru_s2s import MultiModalVelocityEstimatorS2S
+from elope.datasets import ElopeDataLoader 
+from elope.models import build_model
 from elope.trainers import LunarTrainer
 from elope.utils import LOGGER, load_yaml, increment_path
 
@@ -46,8 +45,9 @@ RNG.shuffle(sequences)
 groups = np.array_split(sequences, N_GROUPS)
 groups = [[f"{s:04d}" for s in g] for g in groups]
 
-# Load the model config.
+# Load the model and dataset configs 
 model_cfg = load_yaml(MODEL_CFG)
+dataset_cfg = load_yaml(DATASET_CFG)
 
 # Get current timestamp
 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -61,12 +61,8 @@ SAVE_PATH = increment_path(Path(cfg_weights["path"]) / SAVE_NAME, exist_ok=False
 SAVE_PATH.mkdir(parents=True)
 
 out_type = model_cfg["output_type"]
-LOGGER.info(f"Model type: {out_type}")
-if model_cfg["output_type"] == "sequence": 
-    model_cls = MultiModalVelocityEstimatorS2S
-else: 
-    model_cls = MultiModalVelocityEstimator
-    
+model = build_model(model_cfg, dataset_cfg, device="device")
+LOGGER.info(f"Model type: {type(model)}")
 LOGGER.info(f"Saving cross-training output to {SAVE_PATH} directory.")
 
 # Copy inside the folder the configuration yamls for the dataset and the model 
@@ -124,7 +120,7 @@ for k in range(N_GROUPS):
     )
 
     # Create the network model 
-    model = model_cls.create_model(MODEL_CFG, device=device)
+    model = build_model(model_cfg, dataset_cfg, device="device")
 
     # Create the trainer for the model 
     model_cfg["weights"]["checkpoint_epochs"] = MAX_EPOCHS + 1

@@ -8,8 +8,7 @@ from pathlib import Path
 from tabulate import tabulate
 
 from elope.datasets import EventProcessor, VariableSequenceLoader, FixedSequenceLoader
-from elope.models.emmnetVelGru import MultiModalVelocityEstimator
-from elope.models.emmnetVelGru_s2s import MultiModalVelocityEstimatorS2S
+from elope.models import build_model
 from elope.trainers import LunarTrainer
 from elope.utils import (
     LOGGER, 
@@ -45,7 +44,7 @@ all_sequences = [str(i).zfill(4) for i in range(28)]
 seq_train = all_sequences[:20] + ['0023', '0027'] # 80% for training 
 seq_val = all_sequences[20:23] + all_sequences[24:27]    # 20% for validation
 
-# Load the model config 
+# Load the model config and dataset configs
 model_cfg = load_yaml(MODEL_CFG)
 
 # This script is working only for seq2one models 
@@ -80,18 +79,10 @@ event_normalization = model_cfg["event_normalization"]
 # Check the model outputs only positions 
 assert model_cfg.get("velocity_only", True) == True
 
-# Retrieve the type of model 
+# Create the network and retrieve the type of model output 
 out_type = model_cfg["output_type"]
-assert out_type in ("initial_state", "final_state", "central_state")
-
-LOGGER.info(f"Model type: {out_type}")
-if model_cfg["output_type"] == "sequence": 
-    model_cls = MultiModalVelocityEstimatorS2S
-else: 
-    model_cls = MultiModalVelocityEstimator
-
-# Create the network model
-model = model_cls.create_model(model_cfg, device=device)
+model = build_model(model_cfg, dataset_cfg, device=device)
+LOGGER.info(f"Model type: {type(model)}")
 
 # Load the model weights 
 if WEIGHTS_PATH.exists(): 
@@ -165,7 +156,7 @@ for seq_id in seq_val:
             # Run inference and retrieve the predictions 
             outputs = model(tms_in, events, imu, ranges)
             pred_k = outputs['prediction']
-        
+            
         # Check which output we need to retrieve 
         if out_type == "initial_state": 
             tms, states = tms[:, 0], states[:, 0]
@@ -175,10 +166,16 @@ for seq_id in seq_val:
             tms, states = tms[:, -1], states[:, -1]
             imu, ranges = imu[:, -1], ranges[:, -1]
             
-        else: 
+        elif out_type == "central_state":
             ids = seq_loader.out_len // 2
             tms, states = tms[:, ids], states[:, ids]
             imu, ranges = imu[:, ids], ranges[:, ids]
+            
+        elif out_type == "sequence":
+            # We assume in this case we are using the last state predicted of the sequence
+            pred_k = pred_k[:, -1]
+            tms, states = tms[:, -1], states[:, -1]
+            imu, ranges = imu[:, -1], ranges[:, -1]
         
         # Store the predicted and ground-truth target values
         times.append(tms.cpu().numpy().squeeze())
