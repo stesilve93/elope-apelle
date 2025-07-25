@@ -326,7 +326,7 @@ class SequenceLoader(ABC):
 
 class VariableSequenceLoader(SequenceLoader): 
 
-    def load_sequence(self, sequence_id: str, events_side: str = "both"): 
+    def load_sequence(self, sequence_id: str, events_side: str = "both", test: bool=False): 
         
         # Run the initial method 
         super().load_sequence(sequence_id)    
@@ -369,8 +369,8 @@ class FixedSequenceLoader(SequenceLoader):
         # Store a fixed sampling time for the sequence
         self.seq_dt = time_step
         
-    def load_sequence(self, sequence_id: str, events_side: str = "both"): 
-        
+    def load_sequence(self, sequence_id: str, events_side: str = "both", test: bool=False): 
+    
         # Run the initial method 
         super().load_sequence(sequence_id)
         
@@ -382,10 +382,14 @@ class FixedSequenceLoader(SequenceLoader):
         )(self.seq_times)
         
         # Interpolate the states data at the rangemeter times
-        self.seq_states = np.stack([
-            PchipInterpolator(self.full_times, self.full_states[:, i])(self.seq_times) 
-            for i in range(6)
-        ]).T.copy()
+        if test: 
+            self.seq_states = np.zeros((len(self.seq_times), 6))
+            
+        else:
+            self.seq_states = np.stack([
+                PchipInterpolator(self.full_times, self.full_states[:, i])(self.seq_times) 
+                for i in range(6)
+            ]).T.copy()
         
         # Interpolate the IMU data at the rangemeter times
         self.seq_imu = np.stack([
