@@ -40,6 +40,9 @@ architecture:
   # Hidden dimensions for the IMU embedder
   imu_channels: [64, 64, 32]
 
+  # Length of the event feature vector
+  event_output_dim: 256
+
 # Training losses settings
 losses:
 

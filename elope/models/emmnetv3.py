@@ -10,7 +10,8 @@ from pathlib import Path
 
 from elope.utils import load_yaml
 
-from .encoders.resnet import ResNet, ResNet18, ResNet34
+from .blocks import ResNet, ResNet18, ResNet34
+from .blocks import vAPE, tAPE, lPE
 
 class BaseEmbedding(nn.Module): 
     """Base MLP layer for basic feature expansion.""" 
@@ -108,7 +109,70 @@ class ResNetEventEncoder(nn.Module):
         # Pass the encoder output through a fully connected layer 
         x = self.fc(x) # (B, T, output_dim)
         return x    
+
     
+class SequenceTransfomer(nn.Module): 
+    
+    def __init__(
+        self, 
+        sequence_len: int,
+        input_dim: int, 
+        output_dim: int, 
+        n_heads: int = 8, 
+        n_layers: int = 2, 
+        dropout: int = 0.1, 
+        encoding: str = "tAPE"
+    ):
+        super().__init__()
+        
+        # Sequence length is the number of "states" (i.e., timesteps). `input_dim` is 
+        # the size of the feature vector at each timestep.
+        
+        # Create the positional encoding 
+        assert encoding in ("vAPE", "tAPE", "lPE")
+        if encoding == "vAPE": 
+            self.pos_encoding = vAPE(input_dim, sequence_len, dropout=dropout)
+        elif encoding == "tAPE":
+            self.pos_encoding = tAPE(input_dim, sequence_len, dropout=dropout)
+        elif encoding == "lPE": 
+            self.pos_encoding = lPE(input_dim, sequence_len, dropout=dropout)
+            
+        # Create the transformer encoder: 
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=input_dim, 
+            nhead=n_heads, 
+            dim_feedforward=input_dim * 2, 
+            dropout=dropout, 
+            activation="gelu", 
+            batch_first=True
+        )
+        
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+        
+        # Output projection with regularization if the sizes differ 
+        self.output_proj = nn.Identity() 
+        if output_dim != input_dim: 
+            self.output_proj = nn.Sequential( 
+                nn.Linear(input_dim, output_dim), 
+                nn.LayerNorm(output_dim), 
+                nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+            )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:         
+        # Input shape has size (B, T, N)
+
+        # Add positional encoding to the model 
+        x = self.pos_encoding(x)   # (B, T, N)
+
+        # Apply the transformer 
+        x = self.transformer(x)    # (B, T, D)
+        
+        # Extract the features associated to the last state 
+        x = x[:, -1]    # (B, D)
+        
+        # Final projection 
+        x = self.output_proj(x) # (B, D)
+        return x
     
 class VelocityRegressor(nn.Module): 
     
@@ -169,7 +233,9 @@ class MultiModalTransformerEstimator(nn.Module):
     
     def __init__(
         self, 
-        event_in_channels: int,
+        sequence_length: int,
+        event_channels: int, 
+        event_output_dim: int = 256,
         range_channels: list = [32, 8], 
         imu_channels: list = [64, 64, 32],
         resnet: str = "resnet-18",
@@ -197,18 +263,24 @@ class MultiModalTransformerEstimator(nn.Module):
         )
         
         # Create the encoder for the events tensor
-        event_output = 256 # TODO: hardcoded value
         self.encoder_event = ResNetEventEncoder(
-            resnet=resnet, event_channels=event_in_channels, output_dim=event_output
+            resnet=resnet, event_channels=event_channels, output_dim=event_output_dim
         )
         
         # Total size of the sequence entering the transformer
-        seq_len = range_channels[-1] + imu_channels[-1] + event_output
+        token_size = range_channels[-1] + imu_channels[-1] + event_output_dim
+        transformer_out_dim = 512
         
-        # TODO: add transformer 
+        self.transformer = SequenceTransfomer(
+            sequence_len = sequence_length, 
+            input_dim = token_size,
+            output_dim = transformer_out_dim,
+            dropout = dropout,
+            encoding = "tAPE",
+        )
         
         self.regressor_head = VelocityRegressor(
-            input_dim = , # TODO: add dimension of transfomer output.
+            input_dim = transformer_out_dim,
             output_dim = 3,
             hidden_dim=[128, 64],
             activation=nn.SiLU(), 
@@ -235,10 +307,11 @@ class MultiModalTransformerEstimator(nn.Module):
         cfg_arch = cfg["architecture"]
         
         model = MultiModalTransformerEstimator(
-            event_in_channels=event_channels,
             resnet=cfg_arch["resnet_model"], 
-            range_channels=cfg_arch["range_channels"], 
-            imu_channels=cfg_arch["imu_channels"],
+            event_channels=event_channels, 
+            event_output_dim=int(cfg_arch["event_output_dim"]),
+            range_channels=int(cfg_arch["range_channels"]), 
+            imu_channels=int(cfg_arch["imu_channels"]),
             dropout=float(cfg["dropout"]), 
             **kwargs
         )
@@ -308,13 +381,13 @@ class MultiModalTransformerEstimator(nn.Module):
         feat_events = self.encoder_event(tensor_event) # (B, T, N)
         
         # Stack all the features according to their time-state 
-        features = torch.cat([feat_range, feat_imu, feat_events], dim=-1)
+        features = torch.cat([feat_range, feat_imu, feat_events], dim=-1)   # (B, T, F)
         
-        # TODO: add transformer fuser
+        # Pass the features through the transformer 
+        features = self.transformer(features)   # (B, M)
         
-        
-        # TODO: add final regressor
-        output= self.regressor_head()
+        # Apply the final velocity regressor
+        output = self.regressor_head(features)
         
         return {
             'prediction': output,
