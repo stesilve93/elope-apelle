@@ -21,7 +21,7 @@ sample_interval: 1
 # Type of sequence to use: either "variable" or "fixed".
 # - variable: the data is returned at the indexes associated with the IMU states 
 #   (so at variable timesteps between sequences)
-# - fixed: the data is returned at the altimeter times. So at fixed moments.
+# - fixed: the data is returned at fixed times. So at fixed moments.
 sequence_type: variable
 
 events: 

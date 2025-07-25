@@ -5,7 +5,7 @@ datapath: elope_data/train
 # Path to the folder in which to store the cached dataset model
 output_path: dataset/
 # Name prefix of the dataset
-output_name: dataset-fix-last-1us
+output_name: dataset-fix-03-hybrid-1us
 
 # If true, once the dataset has been loaded, it will be saved to the output directory 
 # written above
@@ -25,7 +25,7 @@ sample_interval: 1
 sequence_type: fixed
 
 # Time step between each sample point, in seconds.
-time_step: 0.1
+time_step: 0.3
 
 events: 
   
@@ -34,11 +34,11 @@ events:
   # Vertical dimension of the image, in pixels.
   height: 200
   # Dimension for the event tensor (i.e., number of time bins)
-  channels: 1 
+  channels: 1
 
   # Type of event encoding, either "count", "last_timestamp", "first_timestamp", 
   # "timestamp" or "hybrid"
   encoder_method: last_timestamp 
-
+  
   # Duration of the window in which events are integrated, in microseconds
   integration_window: 99e4
