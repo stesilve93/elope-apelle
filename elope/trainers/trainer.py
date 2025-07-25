@@ -42,6 +42,9 @@ class LunarTrainer:
         self.model = model
         self.device = device
         
+        # Hard-coded value for the velocity prediction
+        self.velocity_only = True 
+        
         # Store the validation and training dataset loaders
         self.train_loader = train_loader
         self.val_loader = val_loader
