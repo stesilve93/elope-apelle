@@ -280,7 +280,7 @@ class MultiModalTransformerEstimator(nn.Module):
             input_dim = token_size,
             output_dim = transformer_out_dim,
             dropout = dropout,
-            encoding = "vPE",
+            encoding = "vAPE",
             n_heads = 4,
         )
         
