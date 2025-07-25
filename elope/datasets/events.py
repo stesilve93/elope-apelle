@@ -179,6 +179,8 @@ class EventProcessor:
     ) -> np.ndarray: 
         # DOCME: Time must be expressed in microseconds!!
         
+        # Output array is of size (T, H, W, 2)
+        
         # Ensure the size of the time-window is greater than 0
         assert time_window > 0
     
@@ -186,15 +188,19 @@ class EventProcessor:
             return _events_to_tensor_count(events, time, H, W, T, time_window, side, clamp)
         
         elif method == "first_timestamp": 
+            assert T == 1
             return _events_to_tensor_timestamp(events, time, H, W, time_window, side)[0:1]
         
         elif method == "last_timestamp": 
+            assert T == 1
             return _events_to_tensor_timestamp(events, time, H, W, time_window, side)[1:2]
         
         elif method == "timestamp": 
+            assert T == 2
             return _events_to_tensor_timestamp(events, time, H, W, time_window, side)
         
         elif method == "hybrid":             
+            assert T == 3
             
             # Combine the event counts with the freshness values
             ev_1 = _events_to_tensor_count(events, time, H, W, 1, time_window, side, clamp)

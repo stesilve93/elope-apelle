@@ -729,7 +729,7 @@ class RegularizedRegressor(nn.Module):
         return out
 
 
-class MultiModalVelocityEstimator(nn.Module):
+class MultiModalVelocityEstimatorS2S(nn.Module):
     """
     Modified multi-modal network for sequential output
     """
@@ -781,7 +781,7 @@ class MultiModalVelocityEstimator(nn.Module):
         if isinstance(cfg, (str, Path)): 
             cfg = load_yaml(cfg)
         
-        model = MultiModalVelocityEstimator(
+        model = MultiModalVelocityEstimatorS2S(
             use_attention=bool(cfg["use_attention"]), 
             dropout=float(cfg["dropout"]),
             use_physics_aware=bool(cfg["physics_aware"])

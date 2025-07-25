@@ -2,76 +2,79 @@
 import numpy as np 
 import torch
 
+from abc import ABC
 from pathlib import Path 
 
-from scipy.interpolate import UnivariateSpline
+from scipy.interpolate import PchipInterpolator
 
 from elope.utils import LOGGER
 
 from .events import EventProcessor
 
-
-class SequenceLoader: 
-    """DataLoader for Elope's trajectory sequences."""
+class SequenceLoader(ABC): 
+    """Abstract SequenceLoader for Elope's trajectory sequences."""
     
     def __init__(
         self, 
         datapath: str | Path, 
         event_integration_window: float = 1e5, 
         event_encoder_method: str = "last_timestamp", 
-        event_clamp: int = -1,
-        event_H : int = 200,
-        event_W : int = 200,
-        event_T : int = 1,
-        imu_seq_len: int = 5, 
-        imu_padding: str = "static"
+        event_clamp: int = -1, 
+        event_H: int = 200, 
+        event_W: int = 200, 
+        event_T: int = 1,
+        sequence_len: int = 5, 
+        sequence_pad: str = "static",
+        **kwargs
     ): 
-        """Initialise a SequenceLoader class.
         
-        Parameters
-        ----------
-        datapath : str or Path 
-            Path to the folder containing the sequence data.
-        event_integration_window : float, optional
-            Integration time window for the events, in microseconds. Defaults to `1e5`. 
-        event_encoder_method : str, optional
-            Type of event encoding. Defaults to `last_timestamp`.
-        event_clamp : int, optional 
-            Maximum value for the time bins. Defaults to 10.
-        event_H, event_W, event_T : int, optional
-            Height, width and time bins dimensions for the event tensor. 
-        imu_seq_len : int, optional 
-            Length of the IMU and rangemeter data, defaults to 5. 
-        imu_padding: str, optional
-            Type of IMU padding, supported values are "static" or "copy". Defaults to static.
-        """
-
-        self.datapath = Path(datapath) 
+        self.datapath = Path(datapath)
         self.processor = EventProcessor() 
         
-        self.events_full = None 
-        self.timestamps_full  = None 
-        self.trajectory_full = None 
-        self.rangemeter_full = None
+        # Vectors in which to store the sequence data
+        self.full_events = None 
+        self.full_states = None 
+        self.full_times = None 
+        self.full_imu = None 
+        self.full_rangemeter = None 
         
+        # Vectors in which to store the interpreted sequence data 
+        self.seq_events_left  = None
+        self.seq_events_right = None
+        
+        self.seq_states = None 
+        self.seq_times  = None 
+        self.seq_imu    = None 
+        self.seq_ranges = None
+        
+        # Length of the sequence 
         self.seq_len = 0
         
-        # Store the settings for the events processing
-        self.event_integration_window = float(event_integration_window)
-        self.event_encoder_method = event_encoder_method
+        # Sequence timestep 
+        self.seq_dt = 0.0
         
-        self.event_clamp = event_clamp
+        # Store the number of states to provide for a given output
+        self.out_len = int(sequence_len)
         
+        # Currently support only static paddings for the IMU 
+        assert sequence_pad == "static"
+        self.padding = sequence_pad
+        
+        # Store event tensor channels 
         self.H = int(event_H)
         self.W = int(event_W)
         self.T = int(event_T)
         
-        # Ensure the encoder method is supported
-        assert self.event_encoder_method in (
+        # Check that the event inputs make sense
+        assert event_encoder_method in (
             "first_timestamp", "last_timestamp", "timestamp", "count", "hybrid"
         )
         
-        # Ensure the number of time bins is coherent with the encoder method 
+        self.event_integration_window = float(event_integration_window)
+        self.event_encoder_method = event_encoder_method
+        self.event_clamp = float(event_clamp)
+        
+        # Check the encoder is coherent with the dimensions 
         if self.event_encoder_method in ("first_timestamp", "last_timestamp") and self.T != 1: 
             raise ValueError(
                 f"Event encoder {self.event_encoder_method} supports only 1 event channel."
@@ -82,61 +85,60 @@ class SequenceLoader:
         
         elif self.event_encoder_method == "hybrid" and self.T != 3: 
             raise ValueError("Event encoder `hybrid` supports only 3 event channels.")
-        
-        self.imu_seq_len = int(imu_seq_len)
-        self.imu_padding = imu_padding
-        
-        self.events_pre_side = None
+                
+    @property 
+    def timestep(self) -> float: 
+        return self.seq_dt
     
-    def load_sequence(self, sequence_id: str='0000'):
-        """
-        Load a single sequence from the dataset
-        
-        Loads a sequence from the dataset, which consists of a set of events, timestamps,
-        trajectory and optionally rangemeter data.
+    def load_sequence(self, sequence_id: str): 
+        """Load a single sequence file from the datapath directory. 
         
         Parameters
         ----------
-        sequence_id : str, optional
-            Sequence ID to load, by default '0000'
-        """
+        sequence_id : str 
+            Sequence ID to load, e.g., '0000'.
+        """ 
         
         fn = self.datapath / (f"{sequence_id}.npz")
         if not fn.exists(): 
-            raise FileNotFoundError(f"Dataset file not found: {fn}")
+            raise FileNotFoundError(f"Sequence file not found: {fn}.")
         
         LOGGER.info(f"Loading sequence from: \033[33m{fn}\033[0m:")
         sequence = np.load(fn)
         
-        # Extract data from the loaded sequence
-        self.events_full = sequence['events']
-        self.timestamps_full = sequence['timestamps'] 
-        self.trajectory_full = sequence['traj']
-        self.rangemeter_full = sequence['range_meter']
+        # Extract data from the loaded sequence 
+        self.full_events = sequence["events"]
+        self.full_times = sequence["timestamps"]
+        self.full_rangemeter = sequence["range_meter"]
+
+        trajectory = sequence["traj"]
+        self.full_states = trajectory[:, 0:6]
+        self.full_imu = trajectory[:, 6:12]
         
-        # Store the length of the sequence
-        if self.timestamps_full is not None:
-            self.seq_len = len(self.timestamps_full)
-        else: 
-            self.seq_len = 0
-            
-        # Update the event pre-processing flag
-        self.events_pre_side = None
+        # Reset all the states
+        self.seq_events_left = None 
+        self.seq_events_right = None 
         
-        print(f"\t- Events: {len(self.events_full)} events")
-        print(f"\t- Timestamps: {len(self.timestamps_full)} steps")
-        print(f"\t- Trajectory: {self.trajectory_full.shape}")
-        print(f"\t- Rangemeter: {len(self.rangemeter_full)} measurements")
+        self.seq_states = None 
+        self.seq_times = None 
+        self.seq_imu = None 
+        self.seq_ranges = None 
         
-    def get_data_at_time(self, time: float, flip: bool=False) -> dict: 
-        """Extract preprocessed data for a given trajectory timestamp.
+        print(f"\t- Events: {len(self.full_events)} events")
+        print(f"\t- Timestamps: {len(self.full_times)} steps")
+        print(f"\t- States: {self.full_states.shape} values")
+        print(f"\t- IMU: {self.full_imu.shape} measurements")
+        print(f"\t- Rangemeter: {len(self.full_rangemeter)} measurements")
+        
+    def get_data_at_index(self, idx: int, flip: bool = False) -> dict: 
+        """Extract preprocessed data for a given trajectory time.
         
         Parameters
         ----------
-        time : float
-            Desired trajectory timestamp, in seconds. 
-        flip : bool, optional
-            True if the motion should be flipped backwards. Defaults to `False`. 
+        idx : float 
+            Desired trajectory timestamp index. 
+        flip : bool, optional   
+            True if the motion should be flipped backwards. Defaults to `False`.
         
         Returns 
         -------
@@ -150,162 +152,115 @@ class SequenceLoader:
               channels, height an width data.
         """
         
-        if self.events_full is None: 
+        # Ensure the trajectory data has been loaded
+        if self.seq_times is None: 
             raise RuntimeError("Data not loaded. Call `load_sequence` first.")
         
-        # Find the index for t_current in the trajectory timestamps
-        # We need to find the closest timestamp in our trajectory array to t_current. This 
-        # will be the index for the trajectory states and the end point for the IMU and 
-        # rangemeter sequences.
-        traj_idx = np.searchsorted(self.timestamps_full, time, side='right') - 1
+        # Retrieve the starting index for the data    
+        idx_beg = max(0, idx - self.out_len + 1)
         
-        if traj_idx < 0 or traj_idx >= self.seq_len:
-            LOGGER.warning(f"`Time {time:.4f}s is out of sequence timestamp range.")
-            return None
+        # Extract the sequence data
+        out_times = self.seq_times[idx_beg:idx+1]
+        out_imu = self.seq_imu[idx_beg:idx+1]
+        out_states = self.seq_states[idx_beg:idx+1]
+        out_ranges = self.seq_ranges[idx_beg:idx+1].reshape(-1, 1)
         
-        # Compute the time step for the trajectory data 
-        dt = np.mean(np.diff(self.timestamps_full))
-        
-        # ====== Extract the IMU and groundtruth data sequences
-        
-        # Retrieve the sampling times at the desired IMU times
-        imu_start_idx = max(0, traj_idx - self.imu_seq_len + 1)
-        imu_tms = self.timestamps_full[imu_start_idx:traj_idx+1].copy()
-        
-        # Retrieve the angular measures (phi, theta, psi, p, q, r)
-        imu_seq = self.trajectory_full[imu_start_idx:traj_idx+1, 6:12].copy()
-        targets = self.trajectory_full[imu_start_idx:traj_idx+1, 0:6].copy()
-        
-        # Pad if the IMU sequence is shorter than imu_seq_len 
-        if imu_seq.shape[0] < self.imu_seq_len: 
-            npads = self.imu_seq_len - imu_seq.shape[0]
+        if flip:     
+            if self.seq_events_right is None:
+                LOGGER.warning("Right-side events not loaded. Processing.")
+                self.preprocess_events(side="right")
+                
+            out_events = self.seq_events_right[idx_beg:idx+1]
             
-            if imu_seq.shape[0] > 0: 
-                # Repeat the first available IMU measure for padding 
-                padding_imu = np.tile(imu_seq[0], (npads, 1))
-                padding_trg = np.tile(targets[0], (npads, 1))
-                padding_tms = np.tile(imu_tms[0], npads)
+        else:
+            if self.seq_events_left is None: 
+                LOGGER.warning("Left-side events not loaded. Processing.")        
+                self.preprocess_events(side="left")
+            
+            out_events = self.seq_events_left[idx_beg:idx+1]
+            
+        # Add padding to all data if the initial states are missing.
+        npads = self.out_len - len(out_times)
+        if npads > 0: 
+            
+            pad_imu    = np.tile(out_imu[0], (npads, 1))
+            pad_states = np.tile(out_states[0], (npads, 1))
+            pad_ranges = np.tile(out_ranges[0], (npads, 1))
+            pad_events = np.tile(out_events[0], (npads, 1, 1, 1, 1))
+            
+            pad_times = out_times[0] + np.arange(-npads, 0, 1)*self.timestep
                 
-            else: 
-                # If no IMU data at all, pad with the zeros
-                padding_imu = np.zeros((npads, 6))
-                padding_trg = np.zeros((npads, 6))
-                padding_tms = np.zeros(npads)
+            if self.padding == "static": 
+                # Sets the lander to static scenario in which it is not moving 
+                pad_imu[:, 3:6] = 0.0 
+                pad_states[:, 3:6] = 0.0 
                 
-            if self.imu_padding == "static":
-                # Sets the lander to a static scenario in which it is not moving. 
-                padding_imu[:, 3:6] = 0.0 
-                padding_trg[:, 3:6] = 0.0
-                padding_tms[:] = padding_tms[-1] + np.arange(-npads, 0, 1)*dt
-
             # Apply the padding to the IMU and position/velocity data
-            imu_tms = np.hstack((padding_tms, imu_tms))
-            imu_seq = np.vstack([padding_imu, imu_seq])
-            targets = np.vstack([padding_trg, targets])
+            out_times  = np.hstack((pad_times, out_times))
+            out_events = np.vstack([pad_events, out_events])
+            out_states = np.vstack([pad_states, out_states])
+            out_ranges = np.vstack([pad_ranges, out_ranges])
+            out_imu    = np.vstack([pad_imu, out_imu])
             
-            
-        # ====== Extract the rangemeter data 
-        
-        # Find the rangemeter data points and align the start time with the IMU data. 
-        # We retrieve data with a margin of +- dt to prevent interpolation issues.
-        range_mask = (self.rangemeter_full[:, 0] >= imu_tms[0] - dt) & \
-                     (self.rangemeter_full[:, 0] <= imu_tms[-1] + dt)
-                     
-        range_data = self.rangemeter_full[range_mask].copy()
-        
-        # Interpolate the data at all strictly positive times 
-        range_seq = np.interp(imu_tms[imu_tms > 0], range_data[:,0], range_data[:,1])
-        range_seq = range_seq.reshape(-1, 1)
-        
-        # Add padding for the initial missing values.
-        if range_seq.shape[0] < self.imu_seq_len: 
-            npads = self.imu_seq_len - range_seq.shape[0]
-            
-            if self.imu_padding == "static": 
-                # We require knowledge of the altitude at time 0 (altimeter starts at 0.1), 
-                # thus we interpolate the first points to retrieve it.
-                range_beg = UnivariateSpline(range_data[:,0], range_data[:,1], k=1)(0.0)     
-                padding_range = np.tile(range_beg, (npads, 1))
-            
-            else: 
-                padding_range = np.zeros((npads, 1))
-                
-            range_seq = np.vstack([padding_range, range_seq])    
-                
-                
-        # ====== Extract Events 
-        
-        # Compute the events within the integration window for each sequence point
-        events_tensor = []
-        for k in range(traj_idx - self.imu_seq_len + 1, traj_idx+1): 
-            
-            # Check the side that should be used to parse the events
-            side = "right" if flip else "left"
-            
-            # Compute the event tensor for this trajectory state
-            if k >= 0 and self.events_pre_side == side: 
-                events_tensor.append(self.events_tensor[k])
-            
-            else:
-                ik = k - traj_idx + self.imu_seq_len - 1
-                events_k = self.process_events(imu_tms[ik], side=side)
-                events_tensor.append(events_k)
-                            
-        events_tensor = np.stack(events_tensor, axis=0)
-        
         if flip: 
             
             # Copies of the arrays are made because PyTorch does not support 
-            # negative strides
+            # negative states 
             
-            # Flip the rangemeter data and trajectory times
-            range_seq = range_seq[::-1].copy()
-            imu_tms = imu_tms[::-1].copy()
+            # Flip the rangemeter data and trajectory times 
+            out_ranges = out_ranges[::-1].copy() 
+            out_times = out_times[::-1].copy() 
             
-            # Flip the IMU sequence and invert the angular velocities
-            imu_seq = imu_seq[::-1].copy()
-            imu_seq[:, 3:6] = -imu_seq[:, 3:6]
+            # Flip the IMU sequence and invert the velocities
+            out_imu = out_imu[::-1].copy() 
+            out_imu[:, 3:6] = -out_imu[:, 3:6]
             
-            # Flip the trajectory data and invert the velocities
-            targets = targets[::-1].copy()
-            targets[:, 3:6] = -targets[:, 3:6]
+            # Flip the trajectory data and invert the velocities 
+            out_states = out_states[::-1].copy() 
+            out_states[:, 3:6] = -out_states[:, 3:6]
             
             # Flip the events (we still have the first that is referred to the last state)
-            events_tensor = events_tensor[::-1].copy()
-        
+            out_events = out_events[::-1].copy() 
+            
         return {
-            'events_tensor': torch.from_numpy(events_tensor), 
-            'imu_sequence': torch.from_numpy(imu_seq.astype(np.float32)), 
-            'rangemeter_sequence': torch.from_numpy(range_seq.astype(np.float32)), 
-            'ground_truth': torch.from_numpy(targets.astype(np.float32)),
-            'times': torch.tensor(np.float32(imu_tms))
+            'events': torch.from_numpy(out_events), 
+            'imu': torch.from_numpy(out_imu.astype(np.float32)), 
+            'rangemeter': torch.from_numpy(out_ranges.astype(np.float32)), 
+            'states': torch.from_numpy(out_states.astype(np.float32)),
+            'times': torch.tensor(np.float32(out_times))
         }
-        
-    def preprocess_events(self, side: str="left"): 
-        """Preprocess the event tensors at the trajectory states. 
+
+    def preprocess_events(self, side: str ="left"): 
+        """Preprocess the event tensors at the trajectory states.
         
         Parameters
         ----------
-        side : str
-            Direction towards which we are approaching the states, either "left" or "right". 
+        side : str 
+            Direction towards which we are approaching the times, either "left" or "right".
         """
         
-        if self.events_full is None: 
+        # Ensure a trajectory has been loaded
+        if self.seq_times is None:
             raise RuntimeError("Data not loaded. Call `load_sequence` first.")
         
         LOGGER.info(f"Pre-processing events tensors on {side} side.")
+        
+        # Events are processed near the times at which we have IMU data
         events_tensor = []
         for k in range(self.seq_len): 
-            events_tensor.append(
-                self.process_events(self.timestamps_full[k], side=side)
-            )
+            events_tensor.append(self.process_events(self.seq_times[k], side=side))
             
-        # Update the event tensor and flags
-        self.events_tensor = np.stack(events_tensor, axis=0)
-        self.events_pre_side = side 
-    
-    def process_events(self, time: float, side: str="left") -> np.ndarray: 
-        """Process events into a 4D tensor representation (EVFlownet-like).
+        events_tensor = np.stack(events_tensor, axis=0)
+        if side == "left": 
+            self.seq_events_left  = events_tensor
+        else: 
+            self.seq_events_right = events_tensor
+            
+        # Update the event tensor and flags 
+        self.seq_events = np.stack(events_tensor, axis=0)
+        
+    def process_events(self, time: float, side: str = "left") -> np.ndarray: 
+        """Process events into a 4D tensor representation.
         
         Parameters
         ----------
@@ -313,26 +268,26 @@ class SequenceLoader:
             Reference trajectory time, in seconds. 
         side : str, optional 
             Direction towards which we approach the time, either "left" or "right". 
-            Defaults to "left.
+            Defaults to "left".
         
         Returns 
         -------
-        tensor : np.ndarray
-            An array of shape (2, C, H, W) with the events polarity, channels, 
-            height and width data.
+        events_tensor : np.ndarray
+            An array of shape (2, C, H, W) with the events polarity, channels, height and 
+            width data.
         """
         
         # Compute the event window start and end time 
         if side == "left": 
-            t_end = 1e6*time
-            t_beg = t_end - self.event_integration_window     
+            t_end = 1e6*time 
+            t_beg = t_end - self.event_integration_window
         else: 
-            t_beg = 1e6*time
+            t_beg = 1e6*time 
             t_end = t_beg + self.event_integration_window
-        
-        # Filter the events within the integration window and make a copy
-        events_mask = (self.events_full['t'] >= t_beg) & (self.events_full['t'] <= t_end)
-        events = self.events_full[events_mask].copy()
+            
+        # Filter the events within the integration window and make a copy 
+        events_mask = (self.full_events['t'] >= t_beg) & (self.full_events['t'] <= t_end)
+        events = self.full_events[events_mask].copy() 
         
         # Check if the events are in a structured array format
         if events.dtype == [('x', '<i2'), ('y', '<i2'), ('p', '?'), ('t', '<i8')]:
@@ -352,16 +307,109 @@ class SequenceLoader:
         
         # Ensure `events` is a 2D array 
         if events_array.shape[0] == 0: 
-            # LOGGER.warning("No events found in the specified time window.")
             # Return an empty tensor with the expected shape 
             return np.zeros((2, T, H, W), dtype=np.float32)
         
-        # Convert the filtered events into a 4D tensor 
+        # Convert the filtered events into a 4D tensor (T, H, W, 2)
         tensor = self.processor.events_to_tensor(
             events_array, 1e6*time, H, W, T, method=self.event_encoder_method, 
             time_window=self.event_integration_window, side=side, clamp=self.event_clamp
         )
         
-        # Re-arrange the tensor dimensions to PyTorch format (Channels, Time, Height, Width)
-        tensor = np.transpose(tensor, (3, 0, 1, 2))
+        # Re-arrange the tensor dimensions
+        tensor = np.transpose(tensor, (3, 0, 1, 2)) # (2, T, H, W)
         return tensor.astype(np.float32)
+    
+    def __len__(self) -> int: 
+        return self.seq_len
+        
+
+class VariableSequenceLoader(SequenceLoader): 
+
+    def load_sequence(self, sequence_id: str, events_side: str = "both", test: bool=False): 
+        
+        # Run the initial method 
+        super().load_sequence(sequence_id)    
+        
+        # In this case the trajectory times are the ones aligned with the IMU data 
+        self.seq_times = self.full_times.copy()
+        self.seq_states = self.full_states.copy() 
+        self.seq_imu = self.full_imu.copy()
+        
+        # Interpolate the range to retrieve it at the trajectory times
+        self.seq_ranges = PchipInterpolator(
+            self.full_rangemeter[:, 0], self.full_rangemeter[:, 1]
+        )(self.seq_times)
+        
+        # Update the sequence length.
+        self.seq_len = len(self.seq_times)
+        
+        # Update the sequence time step
+        self.seq_dt = self.seq_times[1] - self.seq_times[0]
+        
+        # Pre-load all the events tensors.
+        if events_side == "left": 
+            self.preprocess_events(side="left")
+        elif events_side == "right": 
+            self.preprocess_events(side="right")
+        elif events_side == "both": 
+            self.preprocess_events(side="left")
+            self.preprocess_events(side="right")
+        else: 
+            raise ValueError(f"Unsupported value for `events_side`: {events_side}.")
+
+
+class FixedSequenceLoader(SequenceLoader): 
+    
+    def __init__(self, *args, time_step: float = 0.1, **kwargs): 
+        super().__init__(*args, **kwargs)
+        
+        assert time_step > 0 
+        
+        # Store a fixed sampling time for the sequence
+        self.seq_dt = time_step
+        
+    def load_sequence(self, sequence_id: str, events_side: str = "both", test: bool=False): 
+    
+        # Run the initial method 
+        super().load_sequence(sequence_id)
+        
+        # Lets create the time vector at which we interpolate the data
+        self.seq_times = np.arange(0.0, self.full_rangemeter[-1, 0], self.seq_dt)
+        
+        self.seq_ranges = PchipInterpolator(
+            self.full_rangemeter[:, 0], self.full_rangemeter[:, 1]
+        )(self.seq_times)
+        
+        # Interpolate the states data at the rangemeter times
+        if test: 
+            self.seq_states = np.zeros((len(self.seq_times), 6))
+            
+        else:
+            self.seq_states = np.stack([
+                PchipInterpolator(self.full_times, self.full_states[:, i])(self.seq_times) 
+                for i in range(6)
+            ]).T.copy()
+        
+        # Interpolate the IMU data at the rangemeter times
+        self.seq_imu = np.stack([
+            PchipInterpolator(self.full_times, self.full_imu[:, i])(self.seq_times) 
+            for i in range(6)
+        ]).T.copy()
+        
+        # Update the sequence length.
+        self.seq_len = len(self.seq_times)
+        
+        # Update the sequence time step
+        self.seq_dt = self.seq_times[1] - self.seq_times[0]
+        
+        # Pre-load all the events tensors.
+        if events_side == "left": 
+            self.preprocess_events(side="left")
+        elif events_side == "right": 
+            self.preprocess_events(side="right")
+        elif events_side == "both": 
+            self.preprocess_events(side="left")
+            self.preprocess_events(side="right")
+        else: 
+            raise ValueError(f"Unsupported value for `events_side`: {events_side}.")

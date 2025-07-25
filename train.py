@@ -7,15 +7,15 @@ import torch
 from pathlib import Path 
 
 from elope.datasets import ElopeDataLoader
-from elope.models.emmnetVelGru import MultiModalVelocityEstimator
+from elope.models import build_model
 from elope.trainers import LunarTrainer
 from elope.utils import LOGGER, load_yaml, increment_path
 
 # Path to the yaml file containing the dataset settings
-DATASET_CFG = "cfg/dataset/dataset-hybrid-1us.yml"
+DATASET_CFG = "cfg/dataset/dataset-fix-last-1us.yml"
 
 # Path to the yaml file containing the model settings
-MODEL_CFG = "cfg/training/emmnet-v2.yml"
+MODEL_CFG = "cfg/training/emmnet-v3-nopool.yml"
 
 # Device configuration 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -28,16 +28,22 @@ all_sequences = [str(i).zfill(4) for i in range(28)]
 seq_train = all_sequences[:22] # 80% for training 
 seq_val = all_sequences[22:]   # 20% for validation
 
-# Load the model config.
+# Load the model and dataset config 
 model_cfg = load_yaml(MODEL_CFG)
+dataset_cfg = load_yaml(DATASET_CFG)
+
+# Retrieve the dataset configs 
+sequence_length = int(model_cfg["sequence_length"])
+padding = str(model_cfg["padding"])
+event_norm = str(model_cfg["event_normalization"])
 
 # Create the PyTorch's dataloaders
 train_loader = ElopeDataLoader(
     DATASET_CFG,
     seq_train, 
-    imu_seq_len=int(model_cfg["imu_sequence_length"]),
-    imu_padding=model_cfg["imu_padding"],
-    event_normalization=model_cfg["event_normalization"],
+    sample_len=sequence_length,
+    padding=padding,
+    event_normalization=event_norm,
     augment=True, 
     flip=0.0,
     batch_size=32,
@@ -51,9 +57,9 @@ train_loader = ElopeDataLoader(
 val_loader = ElopeDataLoader(
     DATASET_CFG, 
     seq_val, 
-    imu_seq_len=int(model_cfg["imu_sequence_length"]),
-    imu_padding=model_cfg["imu_padding"],
-    event_normalization=model_cfg["event_normalization"],
+    sample_len=sequence_length,
+    padding=padding,
+    event_normalization=event_norm,
     augment=False,
     flip=0.0,
     batch_size=32, 
@@ -61,15 +67,10 @@ val_loader = ElopeDataLoader(
     num_workers=4
 )
 
-if bool(model_cfg["seq2seq"]):
-    from elope.models.emmnetVelGru_s2s import MultiModalVelocityEstimator
-else:
-    from elope.models.emmnetVelGru import MultiModalVelocityEstimator
-
-LOGGER.info("Model seq2seq: %s", model_cfg["seq2seq"])
-
-# Create the network model 
-model = MultiModalVelocityEstimator.create_model(MODEL_CFG, device=device, )
+# Create the model 
+out_type = model_cfg["output_type"]
+model = build_model(model_cfg, dataset_cfg, device=device)
+LOGGER.info(f"Model type: {type(model)}")
 
 # Create the trainer for the model 
 trainer = LunarTrainer(MODEL_CFG, model, train_loader, val_loader, device)

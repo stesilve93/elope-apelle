@@ -1,0 +1,41 @@
+
+# Path to the folder containing the original training data
+datapath: elope_data/train
+
+# Path to the folder in which to store the cached dataset model
+output_path: dataset/
+# Name prefix of the dataset
+output_name: dataset-var-stamp-1us
+
+# If true, once the dataset has been loaded, it will be saved to the output directory 
+# written above
+save_cache: True
+
+# If true, the program will first look for a dataset file in the output directory
+use_cached: True
+
+# Sampling interval along the trajectory. It determines how many state points are 
+# retrieved from that trajectory. 
+sample_interval: 1
+
+# Type of sequence to use: either "variable" or "fixed".
+# - variable: the data is returned at the indexes associated with the IMU states 
+#   (so at variable timesteps between sequences)
+# - fixed: the data is returned at fixed times. So at fixed moments.
+sequence_type: variable
+
+events: 
+  
+  # Horizontal dimension of the image, in pixels.
+  width: 200
+  # Vertical dimension of the image, in pixels.
+  height: 200
+  # Dimension for the event tensor (i.e., number of time bins)
+  channels: 2
+
+  # Type of event encoding, either "count", "last_timestamp", "first_timestamp", 
+  # "timestamp" or "hybrid"
+  encoder_method: timestamp 
+
+  # Duration of the window in which events are integrated, in microseconds
+  integration_window: 99e4

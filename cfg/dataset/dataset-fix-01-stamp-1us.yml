@@ -5,7 +5,7 @@ datapath: elope_data/train
 # Path to the folder in which to store the cached dataset model
 output_path: dataset/
 # Name prefix of the dataset
-output_name: dataset-last-1us
+output_name: dataset-fix-01-stamp-1us
 
 # If true, once the dataset has been loaded, it will be saved to the output directory 
 # written above
@@ -18,6 +18,15 @@ use_cached: True
 # retrieved from that trajectory. 
 sample_interval: 1
 
+# Type of sequence to use: either "variable" or "fixed".
+# - variable: the data is returned at the indexes associated with the IMU states 
+#   (so at variable timesteps between sequences)
+# - fixed: the data is returned at fixed times. So at fixed moments.
+sequence_type: fixed
+
+# Time step between each sample point, in seconds.
+time_step: 0.1
+
 events: 
   
   # Horizontal dimension of the image, in pixels.
@@ -25,11 +34,11 @@ events:
   # Vertical dimension of the image, in pixels.
   height: 200
   # Dimension for the event tensor (i.e., number of time bins)
-  channels: 1 
+  channels: 2
 
   # Type of event encoding, either "count", "last_timestamp", "first_timestamp", 
   # "timestamp" or "hybrid"
-  encoder_method: last_timestamp 
+  encoder_method: timestamp 
 
   # Duration of the window in which events are integrated, in microseconds
-  integration_window: 1e5
+  integration_window: 99e4

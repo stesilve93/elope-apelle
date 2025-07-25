@@ -5,18 +5,18 @@ weights:
   path: weights
 
   # Name of the model
-  name: elope-emmnet-v2
+  name: elope-emmnet-v3-nopool
 
   # Specify every how many epochs the model weights should be saved.
-  checkpoint_epochs: 2
-  
+  checkpoint_epochs: 10
+
 # Set the type of IMU padding. Support values are "copy", "static". 
 # - copy simply fills unavailable states with a copy of the first available data. 
 # - static copies position/range/angles but sets velocity and angular velocity to zero.
-imu_padding: static 
+padding: static 
 
-# Length of the IMU sequence
-imu_sequence_length: 5
+# Length of the states sequence
+sequence_length: 20
 
 # Type of normalization for the event tensor. Supported values are "null", "standard", 
 # or "minmax".
@@ -26,7 +26,7 @@ event_normalization: "null"
 velocity_only: True
 
 # True if a physics-aware IMU encoder should be used
-physics_aware: True
+physics_aware: False
 
 # True if attention should be used to determine the fusion strategy
 use_attention: True
@@ -34,9 +34,11 @@ use_attention: True
 # Dropout fraction for the model
 dropout: 0.15
 
-# Flag to decide whether the model is sequence2sequence (True) or just predicts the 
-# latest state.
-seq2seq: False
+# Type of output, either "initial_state", "final_state", "central_state" or "sequence".
+output_type: final_state
+
+# True if the "no-pool" version should be used.
+use_nopool: True
 
 # Training losses settings
 losses:
