@@ -101,6 +101,7 @@ events_cfg = dataset_cfg["events"]
 
 seq_loader = seq_cls(
     DATAPATH, 
+    time_step=float(dataset_cfg.get("time_step", -1)),
     event_integration_window=float(events_cfg["integration_window"]),
     event_encoder_method=events_cfg["encoder_method"],
     event_clamp=int(events_cfg.get("clamp", -1)),

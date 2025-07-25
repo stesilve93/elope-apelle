@@ -24,6 +24,9 @@ sample_interval: 1
 # - fixed: the data is returned at the altimeter times. So at fixed moments.
 sequence_type: fixed
 
+# Time step between each sample point, in seconds.
+time_step: 0.1
+
 events: 
   
   # Horizontal dimension of the image, in pixels.

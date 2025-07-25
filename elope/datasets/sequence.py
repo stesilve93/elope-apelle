@@ -24,7 +24,8 @@ class SequenceLoader(ABC):
         event_W: int = 200, 
         event_T: int = 1,
         sequence_len: int = 5, 
-        sequence_pad: str = "static"
+        sequence_pad: str = "static",
+        **kwargs
     ): 
         
         self.datapath = Path(datapath)
@@ -360,17 +361,25 @@ class VariableSequenceLoader(SequenceLoader):
 
 class FixedSequenceLoader(SequenceLoader): 
     
+    def __init__(self, *args, time_step: float = 0.1, **kwargs): 
+        super().__init__(*args, **kwargs)
+        
+        assert time_step > 0 
+        
+        # Store a fixed sampling time for the sequence
+        self.seq_dt = time_step
+        
     def load_sequence(self, sequence_id: str, events_side: str = "both"): 
         
         # Run the initial method 
         super().load_sequence(sequence_id)
         
-        # The rangemeter data is always starting at 0.1 Hz, Thus we need to augment 
-        # the time vector at that value. 
+        # Lets create the time vector at which we interpolate the data
+        self.seq_times = np.arange(0.0, self.full_rangemeter[-1, 0], self.seq_dt)
         
-        # In this case the trajectory times are the ones of the rangemeter 
-        self.seq_times  = self.full_rangemeter[:, 0]
-        self.seq_ranges = self.full_rangemeter[:, 1]
+        self.seq_ranges = PchipInterpolator(
+            self.full_rangemeter[:, 0], self.full_rangemeter[:, 1]
+        )(self.seq_times)
         
         # Interpolate the states data at the rangemeter times
         self.seq_states = np.stack([

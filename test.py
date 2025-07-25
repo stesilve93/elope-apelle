@@ -63,6 +63,7 @@ else:
 # Create the sequence loader
 seq_loader = seq_cls(
     dataset_cfg["datapath"], 
+    time_step=float(dataset_cfg.get("time_step", -1)),
     event_integration_window=float(events_cfg["integration_window"]),
     event_encoder_method=events_cfg["encoder_method"],
     event_clamp=int(events_cfg.get("clamp", -1)),

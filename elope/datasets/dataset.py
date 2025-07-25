@@ -23,9 +23,10 @@ class ElopeDataset(Dataset):
     default_cfg = {
         'save_cache': False, 
         'use_cached': False, 
+        'time_step': -1, 
     }
     
-    KEYS_DATASET = ["sample_interval", "sequence_type", "events"]
+    KEYS_DATASET = ["sample_interval", "sequence_type", "time_step", "events"]
     
     def __init__(
         self, 
@@ -67,6 +68,7 @@ class ElopeDataset(Dataset):
         # Create a Sequence loader instance 
         self.seq_loader = seq_cls(
             cfg["datapath"], 
+            time_step=float(self.cfg_dataset["time_step"]),
             event_integration_window=float(cfg_events["integration_window"]),
             event_encoder_method=cfg_events["encoder_method"],
             event_clamp=float(cfg_events.get("clamp", -1)),
