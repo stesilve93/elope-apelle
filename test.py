@@ -7,19 +7,19 @@ from pathlib import Path
 
 from tabulate import tabulate
 
-from elope.datasets import ElopeDataLoader, SequenceLoader, EventProcessor
+from elope.datasets import EventProcessor, VariableSequenceLoader, FixedSequenceLoader
 from elope.models.emmnetVelGru import MultiModalVelocityEstimator
+from elope.models.emmnetVelGru_s2s import MultiModalVelocityEstimatorS2S
 from elope.trainers import LunarTrainer
 from elope.utils import (
     LOGGER, 
     gridminor, 
     increment_path,
     load_yaml, 
-    compute_posz, 
     compute_posvelz,
 )
 
-MODEL_PATH = Path("weights") / "elope-emmnet-v1_20250722_064745"
+MODEL_PATH = Path("weights") / "test"
 
 # Path to the yaml file containing the dataset settings
 DATASET_CFG = MODEL_PATH / "dataset-cfg.yml"
@@ -49,30 +49,49 @@ seq_val = all_sequences[20:23] + all_sequences[24:27]    # 20% for validation
 model_cfg = load_yaml(MODEL_CFG)
 
 # This script is working only for seq2one models 
-assert model_cfg["seq2seq"] == False
+assert model_cfg["output_type"] != "sequence"
 
 # Load the dataset config and create a Sequence Loader
 dataset_cfg = load_yaml(DATASET_CFG)
 events_cfg = dataset_cfg["events"]
 
-seq_loader = SequenceLoader(
-    dataset_cfg["datapath"], 
-    event_integration_window=events_cfg["integration_window"],
-    event_encoder_method=events_cfg["encoder_method"],
-    event_clamp=events_cfg.get("clamp", -1),
-    event_H=events_cfg["height"],
-    event_W=events_cfg["width"],
-    event_T=events_cfg["channels"], 
-    imu_seq_len=int(model_cfg["imu_sequence_length"]), 
-    imu_padding=model_cfg["imu_padding"]
-)
+# Retrieve the type of sequence loader
+if dataset_cfg["sequence_type"] == "fixed": 
+    seq_cls = FixedSequenceLoader
+else: 
+    seq_cls = VariableSequenceLoader
 
+# Create the sequence loader
+seq_loader = seq_cls(
+    dataset_cfg["datapath"], 
+    event_integration_window=float(events_cfg["integration_window"]),
+    event_encoder_method=events_cfg["encoder_method"],
+    event_clamp=int(events_cfg.get("clamp", -1)),
+    event_H=int(events_cfg["height"]),
+    event_W=int(events_cfg["width"]),
+    event_T=int(events_cfg["channels"]), 
+    sequence_len=int(model_cfg["sequence_length"]), 
+    sequence_pad=model_cfg["padding"]
+)
 
 # Retrieve the type of event normalization 
 event_normalization = model_cfg["event_normalization"]
 
-# Create the network model 
-model = MultiModalVelocityEstimator.create_model(model_cfg, device=device)
+# Check the model outputs only positions 
+assert model_cfg.get("velocity_only", True) == True
+
+# Retrieve the type of model 
+out_type = model_cfg["output_type"]
+assert out_type in ("initial_state", "final_state", "central_state")
+
+LOGGER.info(f"Model type: {out_type}")
+if model_cfg["output_type"] == "sequence": 
+    model_cls = MultiModalVelocityEstimatorS2S
+else: 
+    model_cls = MultiModalVelocityEstimator
+
+# Create the network model
+model = model_cls.create_model(model_cfg, device=device)
 
 # Load the model weights 
 if WEIGHTS_PATH.exists(): 
@@ -88,7 +107,7 @@ model.eval()
 model.to(device)
 
 # Retrieve the starting index 
-idx_beg = seq_loader.imu_seq_len - 1
+idx_beg = seq_loader.out_len - 1
 
 tab_headers = ["sequence", "time_step", "vel_mse_abs", "vel_mse_rel", "elope_score"]
 tab_values  = []
@@ -106,26 +125,26 @@ for seq_id in seq_val:
     
     # Load the sequence
     LOGGER.info(f"Loading test sequence: {seq_id}")
-    seq_loader.load_sequence(seq_id)
-    seq_loader.preprocess_events(side="left")
-    
+    seq_loader.load_sequence(seq_id, events_side="left")
+
     # Compute the timestep of this sequence 
-    seq_dt = seq_loader.timestamps_full[1] - seq_loader.timestamps_full[0]
+    seq_dt = seq_loader.full_times[1] - seq_loader.full_times[0]
     
     # Initialize the arrays for the results
     predictions, targets, times = [], [], []
     rangemeters, angles = [], []
-    for k in range(idx_beg, seq_loader.seq_len): 
+    
+    for k in range(idx_beg, len(seq_loader)):
         
         # Retrieve the data at the current time
-        data_k = seq_loader.get_data_at_time(seq_loader.timestamps_full[k])
+        data_k = seq_loader.get_data_at_index(k)
 
         # Unpack and move to device after adding the batch dimension 
-        tms       = data_k['times'].unsqueeze(0).to(device)
-        events    = data_k['events_tensor'].unsqueeze(0).to(device)
-        imu_seq   = data_k['imu_sequence'].unsqueeze(0).to(device)
-        range_seq = data_k['rangemeter_sequence'].unsqueeze(0).to(device)
-        states    = data_k['ground_truth'].unsqueeze(0).to(device)
+        tms    = data_k['times'].unsqueeze(0).to(device)
+        imu    = data_k['imu'].unsqueeze(0).to(device)
+        states = data_k['states'].unsqueeze(0).to(device)
+        ranges = data_k['rangemeter'].unsqueeze(0).to(device)
+        events = data_k['events'].unsqueeze(0).to(device)
         
         # Check whether events should be normalized
         if event_normalization != "null":         
@@ -139,27 +158,38 @@ for seq_id in seq_val:
                     events[i], method=event_normalization, max_val=max_val
                 )
         
-        if not model_cfg["seq2seq"]: 
-            events = events[:, -1]
-            states = states[:, -1]
-        
-        # Normalize the times 
-        tms = tms - tms[..., 0:1]
+        # Normalize the input times
+        tms_in = tms - tms[..., 0:1]
         
         with torch.no_grad(): 
             # Run inference and retrieve the predictions 
-            outputs = model(tms, events, imu_seq, range_seq)
+            outputs = model(tms_in, events, imu, ranges)
             pred_k = outputs['prediction']
+        
+        # Check which output we need to retrieve 
+        if out_type == "initial_state": 
+            tms, states = tms[:, 0], states[:, 0]
+            imu, ranges = imu[:, 0], ranges[:, 0]
             
-        # Store the results 
-        times.append(seq_loader.timestamps_full[k])
+        elif out_type == "final_state": 
+            tms, states = tms[:, -1], states[:, -1]
+            imu, ranges = imu[:, -1], ranges[:, -1]
+            
+        else: 
+            ids = seq_loader.out_len // 2
+            tms, states = tms[:, ids], states[:, ids]
+            imu, ranges = imu[:, ids], ranges[:, ids]
+        
+        # Store the predicted and ground-truth target values
+        times.append(tms.cpu().numpy().squeeze())
         targets.append(states.cpu().numpy().squeeze())
         predictions.append(pred_k.cpu().numpy().squeeze())
-        
-        # Store additional values 
-        rangemeters.append(range_seq.cpu().numpy().squeeze()[-1])
-        angles.append(imu_seq.cpu().numpy().squeeze()[-1, :3])
             
+        # Store additional values 
+        rangemeters.append(ranges.cpu().numpy().squeeze())
+        angles.append(imu.cpu().numpy().squeeze()[:3])
+        
+    # Convert all the data into arrays
     predictions = np.array(predictions)
     targets = np.array(targets)
     times = np.array(times)
@@ -182,7 +212,7 @@ for seq_id in seq_val:
     test_metrics = LunarTrainer.compute_metrics(
         torch.tensor(predictions), 
         torch.tensor(targets), 
-        velocity_only=model_cfg["velocity_only"]
+        velocity_only=model_cfg.get("velocity_only", True)
     )
     
     # Store the statistics of this trajectory
@@ -194,7 +224,7 @@ for seq_id in seq_val:
     
     if SAVE_PLOTS: 
         # Get the offest index
-        ioff = 0 if model_cfg["velocity_only"] else 3
+        ioff = 0 if model_cfg.get("velocity_only", True) else 3
         
         # Create the plots with the predicted velocities 
         fig, axes = plt.subplots(nrows=3, figsize=(15,15), sharex=True)

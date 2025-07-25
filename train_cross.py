@@ -1,6 +1,5 @@
 
 import datetime 
-import random
 import shutil
 
 import numpy as np
@@ -11,12 +10,12 @@ from tabulate import tabulate
 
 from elope.datasets import ElopeDataLoader
 from elope.models.emmnetVelGru import MultiModalVelocityEstimator
+from elope.models.emmnetVelGru_s2s import MultiModalVelocityEstimatorS2S
 from elope.trainers import LunarTrainer
 from elope.utils import LOGGER, load_yaml, increment_path
 
-
 # Path to the yaml file containing the dataset settings
-DATASET_CFG = "cfg/dataset/dataset-hybrid-1us.yml"
+DATASET_CFG = "cfg/dataset/dataset-last-1us.yml"
 
 # Path to the yaml file containing the model settings
 MODEL_CFG = "cfg/training/emmnet-v1.yml"
@@ -50,11 +49,6 @@ groups = [[f"{s:04d}" for s in g] for g in groups]
 # Load the model config.
 model_cfg = load_yaml(MODEL_CFG)
 
-if bool(model_cfg["seq2seq"]):
-    from elope.models.emmnetVelGru_s2s import MultiModalVelocityEstimator
-else:
-    from elope.models.emmnetVelGru import MultiModalVelocityEstimator
-
 # Get current timestamp
 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     
@@ -66,7 +60,13 @@ SAVE_NAME = cfg_weights["name"] + f"_{timestamp}"
 SAVE_PATH = increment_path(Path(cfg_weights["path"]) / SAVE_NAME, exist_ok=False)
 SAVE_PATH.mkdir(parents=True)
 
-LOGGER.info("Model seq2seq: %s", model_cfg["seq2seq"])
+out_type = model_cfg["output_type"]
+LOGGER.info(f"Model type: {out_type}")
+if model_cfg["output_type"] == "sequence": 
+    model_cls = MultiModalVelocityEstimatorS2S
+else: 
+    model_cls = MultiModalVelocityEstimator
+    
 LOGGER.info(f"Saving cross-training output to {SAVE_PATH} directory.")
 
 # Copy inside the folder the configuration yamls for the dataset and the model 
@@ -75,7 +75,7 @@ shutil.copy(MODEL_CFG, SAVE_PATH / "model-cfg.yml")
 
 tab_headers = ["group", "elope_score", "val_group"]
 tab_values  = []
-
+        
 # Start the k-fold cross-validation
 for k in range(N_GROUPS):
     
@@ -85,14 +85,19 @@ for k in range(N_GROUPS):
     # Retrieve the training sequence
     seq_train = groups[:k] + groups[k+1:]
     seq_train = [s for sublist in seq_train for s in sublist]
+        
+    # Retrieve the dataset configs 
+    sequence_length = int(model_cfg["sequence_length"])
+    padding = str(model_cfg["padding"])
+    event_norm = str(model_cfg["event_normalization"])
 
     # Create the PyTorch's dataloaders
     train_loader = ElopeDataLoader(
         DATASET_CFG,
         seq_train, 
-        imu_seq_len=int(model_cfg["imu_sequence_length"]),
-        imu_padding=model_cfg["imu_padding"],
-        event_normalization=model_cfg["event_normalization"],
+        sample_len=sequence_length,
+        padding=padding,
+        event_normalization=event_norm,
         verbose=False,
         augment=False,
         flip=0.0, 
@@ -106,10 +111,10 @@ for k in range(N_GROUPS):
 
     val_loader = ElopeDataLoader(
         DATASET_CFG, 
-        seq_val, 
-        imu_seq_len=int(model_cfg["imu_sequence_length"]),
-        imu_padding=model_cfg["imu_padding"],
-        event_normalization=model_cfg["event_normalization"],
+        seq_val,     
+        sample_len=sequence_length,
+        padding=padding,
+        event_normalization=event_norm,
         verbose=False,
         augment=False,
         flip=0.0,
@@ -119,7 +124,7 @@ for k in range(N_GROUPS):
     )
 
     # Create the network model 
-    model = MultiModalVelocityEstimator.create_model(MODEL_CFG, device=device)
+    model = model_cls.create_model(MODEL_CFG, device=device)
 
     # Create the trainer for the model 
     model_cfg["weights"]["checkpoint_epochs"] = MAX_EPOCHS + 1
