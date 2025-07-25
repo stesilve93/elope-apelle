@@ -18,6 +18,12 @@ use_cached: True
 # retrieved from that trajectory. 
 sample_interval: 1
 
+# Type of sequence to use: either "variable" or "fixed".
+# - variable: the data is returned at the indexes associated with the IMU states 
+#   (so at variable timesteps between sequences)
+# - fixed: the data is returned at the altimeter times. So at fixed moments.
+sequence_type: fixed
+
 events: 
   
   # Horizontal dimension of the image, in pixels.
@@ -32,4 +38,4 @@ events:
   encoder_method: timestamp 
 
   # Duration of the window in which events are integrated, in microseconds
-  integration_window: 1e5
+  integration_window: 99e4

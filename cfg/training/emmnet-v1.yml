@@ -13,10 +13,10 @@ weights:
 # Set the type of IMU padding. Support values are "copy", "static". 
 # - copy simply fills unavailable states with a copy of the first available data. 
 # - static copies position/range/angles but sets velocity and angular velocity to zero.
-imu_padding: static 
+padding: static 
 
-# Length of the IMU sequence
-imu_sequence_length: 5
+# Length of the states sequence
+sequence_length: 5
 
 # Type of normalization for the event tensor. Supported values are "null", "standard", 
 # or "minmax".
@@ -34,9 +34,8 @@ use_attention: True
 # Dropout fraction for the model
 dropout: 0.15
 
-# Flag to decide whether the model is sequence2sequence (True) or just predicts the 
-# latest state.
-seq2seq: False
+# Type of output, either "initial_state", "final_state", "central_state" or "sequence".
+output_type: final_state
 
 # Training losses settings
 losses:

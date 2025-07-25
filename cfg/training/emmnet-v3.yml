@@ -5,7 +5,7 @@ weights:
   path: weights
 
   # Name of the model
-  name: elope-emmnet-v1
+  name: elope-emmnet-v3
 
   # Specify every how many epochs the model weights should be saved.
   checkpoint_epochs: 10
@@ -13,30 +13,32 @@ weights:
 # Set the type of IMU padding. Support values are "copy", "static". 
 # - copy simply fills unavailable states with a copy of the first available data. 
 # - static copies position/range/angles but sets velocity and angular velocity to zero.
-imu_padding: static 
+padding: static 
 
 # Length of the IMU sequence
-imu_sequence_length: 5
+sequence_length: 5
+
+# Type of output, either "initial_state", "final_state", "central_state" or "sequence".
+output_type: final_state
 
 # Type of normalization for the event tensor. Supported values are "null", "standard", 
 # or "minmax".
 event_normalization: "null"
 
-# True if the network should only provide the velocity as an input
-velocity_only: True
-
-# True if a physics-aware IMU encoder should be used
-physics_aware: False
-
-# True if attention should be used to determine the fusion strategy
-use_attention: True
-
 # Dropout fraction for the model
-dropout: 0.15
+dropout: 0.05
 
-# Flag to decide whether the model is sequence2sequence (True) or just predicts the 
-# latest state.
-seq2seq: False
+# Network architecture 
+architecture: 
+
+  # Type of ResNet model used in the event encoder.
+  resnet_model: resnet-18 
+
+  # Hidden dimensions for the range embedding
+  range_channels: [32, 8]
+
+  # Hidden dimensions for the IMU embedder
+  imu_channels: [64, 64, 32]
 
 # Training losses settings
 losses:
