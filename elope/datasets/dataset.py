@@ -16,7 +16,7 @@ from elope.utils import (
 )
 
 from .events import EventProcessor
-from .sequence import SequenceLoader
+from .sequence import FixedSequenceLoader, VariableSequenceLoader
 
 class ElopeDataset(Dataset): 
     
@@ -25,13 +25,13 @@ class ElopeDataset(Dataset):
         'use_cached': False, 
     }
     
-    KEYS_DATASET = ["sample_interval", "events"]
+    KEYS_DATASET = ["sample_interval", "sequence_type", "events"]
     
     def __init__(
         self, 
         cfg: dict | str | Path, 
         sequence_ids: list, 
-        imu_seq_len: int, 
+        sample_len: int, 
         verbose: bool=True, 
         **kwargs
     ): 
@@ -48,28 +48,33 @@ class ElopeDataset(Dataset):
         self.cfg_dataset = {}
         for key in self.KEYS_DATASET: 
             self.cfg_dataset[key] = cfg[key]
-            
+        
         # Retrieve all the events dimensions
         cfg_events = self.cfg_dataset["events"]
             
         # Store the length of the IMU sequence 
-        self.imu_seq_len = imu_seq_len
+        self.sample_len = sample_len
         
-        # Retrieve the type of IMU padding 
-        self.imu_padding = cfg.get("imu_padding", "static")
-        assert self.imu_padding == "static"
+        # Retrieve the type of data padding 
+        self.padding = cfg.get("padding", "static")
+        assert self.padding == "static"
+        
+        # Retrieve the type of sequence 
+        seq_type = self.cfg_dataset["sequence_type"]
+        assert seq_type in ("fixed", "variable")
+        seq_cls = FixedSequenceLoader if seq_type == "fixed" else VariableSequenceLoader
         
         # Create a Sequence loader instance 
-        self.seq_loader = SequenceLoader(
+        self.seq_loader = seq_cls(
             cfg["datapath"], 
-            event_integration_window=cfg_events["integration_window"],
+            event_integration_window=float(cfg_events["integration_window"]),
             event_encoder_method=cfg_events["encoder_method"],
-            event_clamp=cfg_events.get("clamp", -1),
-            event_H=cfg_events["height"],
-            event_W=cfg_events["width"],
-            event_T=cfg_events.get("channels", 1), 
-            imu_seq_len=self.imu_seq_len,
-            imu_padding=self.imu_padding
+            event_clamp=float(cfg_events.get("clamp", -1)),
+            event_H=int(cfg_events["height"]),
+            event_W=int(cfg_events["width"]),
+            event_T=int(cfg_events.get("channels", 1)), 
+            sequence_len=self.sample_len,
+            sequence_pad=self.padding
         )
         
         # Store the dataset configuration for the sequences as a hash key.
@@ -245,45 +250,33 @@ class ElopeDataset(Dataset):
         """
         
         # Load the full sequence data and get its length
-        self.seq_loader.load_sequence(seq_id)
-        if self.seq_loader.seq_len == 0: 
+        self.seq_loader.load_sequence(seq_id, events_side="both")
+        if len(self.seq_loader) == 0: 
             return None
 
-        # Retrieve sequence times, rangemeter, IMU and ground-truth data
-        times   = self.seq_loader.timestamps_full
-        targets = self.seq_loader.trajectory_full[:, 0:6]
-        imus    = self.seq_loader.trajectory_full[:, 6:12]
-        
-        # Interpolate the rangemeter values at this time
-        rangemeters = np.interp(
-            times,
-            self.seq_loader.rangemeter_full[:, 0], 
-            self.seq_loader.rangemeter_full[:, 1], 
-        )
-        
-        # Load the events on the left-side of the points
-        self.seq_loader.preprocess_events(side="left")    
-        events_left = self.seq_loader.events_tensor 
-        
-        # Load the events on the right-side of the points 
-        self.seq_loader.preprocess_events(side="right")
-        events_right = self.seq_loader.events_tensor
-        
+        # Retrieve all the sequence parameters
+        imu          = self.seq_loader.seq_imu 
+        times        = self.seq_loader.seq_times 
+        targets      = self.seq_loader.seq_states
+        rangemeter   = self.seq_loader.seq_ranges
+        events_left  = self.seq_loader.seq_events_left
+        events_right = self.seq_loader.seq_events_right
+
         # Retrieve the sequence sampling interval 
         sample_interval = int(self.cfg_dataset["sample_interval"])
         
         # Retrieve all the arrays at the the target interval
+        imu_out = torch.from_numpy(imu[::sample_interval].astype(np.float32))
         tms_out = torch.from_numpy(times[::sample_interval].astype(np.float32))
         trg_out = torch.from_numpy(targets[::sample_interval].astype(np.float32))
-        imu_out = torch.from_numpy(imus[::sample_interval].astype(np.float32))
-        rng_out = torch.from_numpy(rangemeters[::sample_interval].astype(np.float32))
+        rng_out = torch.from_numpy(rangemeter[::sample_interval].astype(np.float32))
         evl_out = torch.from_numpy(events_left[::sample_interval].astype(np.float32))
         evr_out = torch.from_numpy(events_right[::sample_interval].astype(np.float32))
 
         return {
+            "imu": imu_out, 
             "times": tms_out, 
             "targets": trg_out, 
-            "imu": imu_out, 
             "rangemeter": rng_out, 
             "events_left": evl_out,
             "events_right": evr_out
@@ -292,11 +285,11 @@ class ElopeDataset(Dataset):
     def _seq2samples(self, seq: dict) -> list:
         """Convert a dictionary with sequence data into dataset samples.""" 
         
-        times = seq["times"]
-        targets = seq["targets"]
-        imu = seq["imu"]
-        rangemeter = seq["rangemeter"]
-        events_left = seq["events_left"]
+        imu          = seq["imu"]
+        times        = seq["times"]
+        targets      = seq["targets"]
+        rangemeter   = seq["rangemeter"]
+        events_left  = seq["events_left"]
         events_right = seq["events_right"]
         
         ns = len(times)
