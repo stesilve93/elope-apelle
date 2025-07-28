@@ -26,7 +26,7 @@ class ElopeDataset(Dataset):
         'time_step': -1, 
     }
     
-    KEYS_DATASET = ["sample_interval", "sequence_type", "time_step", "events"]
+    KEYS_DATASET = ["sequence_type", "time_step", "events"]
     
     def __init__(
         self, 
@@ -34,6 +34,7 @@ class ElopeDataset(Dataset):
         sequence_ids: list, 
         sample_len: int, 
         verbose: bool=True, 
+        event_integration_window: float=None,
         **kwargs
     ): 
         
@@ -55,6 +56,9 @@ class ElopeDataset(Dataset):
             
         # Store the length of the IMU sequence 
         self.sample_len = sample_len
+        
+        # Retrieve the interval between sub-sequences 
+        self.sample_interval = int(cfg.get("sample_interval", 1))
         
         # Retrieve the type of data padding 
         self.padding = cfg.get("padding", "static")
@@ -86,6 +90,16 @@ class ElopeDataset(Dataset):
         self.event_normalization = cfg.get("event_normalization", "null")
         assert self.event_normalization in ("null", "standard", "minmax")
         
+        self.new_integration_window = None
+        if event_integration_window is not None: 
+            # This makes sense only if the event encoder is last_timestamp
+            assert self.cfg_dataset["events"]["encoder_method"] == "last_timestamp"
+            
+            original_window = float(cfg["events"]["integration_window"])
+            if event_integration_window != original_window: 
+                LOGGER.info(f"Event window reset to: {event_integration_window}")
+                self.new_integration_window = event_integration_window
+                
         # Check whether cached data is available, and try loading
         has_cache = False 
         if cfg["use_cached"]: 
@@ -256,54 +270,60 @@ class ElopeDataset(Dataset):
         if len(self.seq_loader) == 0: 
             return None
 
-        # Retrieve all the sequence parameters
-        imu          = self.seq_loader.seq_imu 
-        times        = self.seq_loader.seq_times 
-        targets      = self.seq_loader.seq_states
-        rangemeter   = self.seq_loader.seq_ranges
-        events_left  = self.seq_loader.seq_events_left
-        events_right = self.seq_loader.seq_events_right
-
-        # Retrieve the sequence sampling interval 
-        sample_interval = int(self.cfg_dataset["sample_interval"])
-        
-        # Retrieve all the arrays at the the target interval
-        imu_out = torch.from_numpy(imu[::sample_interval].astype(np.float32))
-        tms_out = torch.from_numpy(times[::sample_interval].astype(np.float32))
-        trg_out = torch.from_numpy(targets[::sample_interval].astype(np.float32))
-        rng_out = torch.from_numpy(rangemeter[::sample_interval].astype(np.float32))
-        evl_out = torch.from_numpy(events_left[::sample_interval].astype(np.float32))
-        evr_out = torch.from_numpy(events_right[::sample_interval].astype(np.float32))
-
+        # Retrieve all the arrays of the sequence
         return {
-            "imu": imu_out, 
-            "times": tms_out, 
-            "targets": trg_out, 
-            "rangemeter": rng_out, 
-            "events_left": evl_out,
-            "events_right": evr_out
+            "imu": torch.from_numpy(self.seq_loader.seq_imu .astype(np.float32)), 
+            "times": torch.from_numpy(self.seq_loader.seq_times .astype(np.float32)), 
+            "targets": torch.from_numpy(self.seq_loader.seq_states.astype(np.float32)), 
+            "rangemeter": torch.from_numpy(self.seq_loader.seq_ranges.astype(np.float32)), 
+            "events_left": torch.from_numpy(
+                self.seq_loader.seq_events_left.astype(np.float32)
+            ),
+            "events_right": torch.from_numpy(
+                self.seq_loader.seq_events_right.astype(np.float32)
+            )
         }
         
     def _seq2samples(self, seq: dict) -> list:
         """Convert a dictionary with sequence data into dataset samples.""" 
         
-        imu          = seq["imu"]
-        times        = seq["times"]
-        targets      = seq["targets"]
-        rangemeter   = seq["rangemeter"]
-        events_left  = seq["events_left"]
-        events_right = seq["events_right"]
+        # Retrieve the sequence states at the given interval
+        imu          = seq["imu"][::self.sample_interval]
+        times        = seq["times"][::self.sample_interval]
+        targets      = seq["targets"][::self.sample_interval]
+        rangemeter   = seq["rangemeter"][::self.sample_interval]
+        events_left  = seq["events_left"][::self.sample_interval]
+        events_right = seq["events_right"][::self.sample_interval]
         
         ns = len(times)
         samples = []
         for k in range(ns): 
+            
+            # Retrieve the events
+            event_lk = events_left[k] 
+            event_rk = events_right[k]
+            
+            # Check whether they have to be resized to a different window
+            if self.new_integration_window is not None: 
+                event_lk = EventProcessor.reduce_window(
+                    event_lk, 
+                    float(self.cfg_dataset["events"]["integration_window"]), 
+                    self.new_integration_window
+                )
+                
+                event_rk = EventProcessor.reduce_window(
+                    event_rk, 
+                    float(self.cfg_dataset["events"]["integration_window"]), 
+                    self.new_integration_window
+                )
+            
             samples.append((
                 times[k], 
                 targets[k], 
                 imu[k], 
                 rangemeter[k], 
-                events_left[k], 
-                events_right[k]
+                event_lk,
+                event_rk,
             ))
             
         return samples
@@ -509,4 +529,3 @@ class ElopeDataset(Dataset):
         # TODO: EVENT NOISE???
 
         return events, imus, ranges, targets, times
-        

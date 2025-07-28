@@ -166,6 +166,38 @@ class EventProcessor:
         return frame
     
     @staticmethod 
+    def reduce_window(events: np.ndarray, window: float, new_window: float) -> np.ndarray:
+        """Reduce the event integration window to a smaller one for the last timestamp.
+        
+        Parameters
+        ----------
+        events : np.ndarray 
+            Array with the latest events timestamps.
+        window : float
+            Original integration window, in us. 
+        new_window : float 
+            New integration window, in us.
+            
+        Returns 
+        -------
+        out : np.ndarray 
+            Events tensor with resized values.
+        """
+        
+        if new_window == window:
+            return events
+        
+        assert new_window < window
+        
+        wnd_beg = window - new_window 
+        events = window*events 
+        events[events <= wnd_beg] = 0.0 
+        
+        mask = events > 0 
+        events[mask] = (events[mask] - wnd_beg)/new_window 
+        return events    
+    
+    @staticmethod 
     def events_to_tensor(
         events: np.ndarray, 
         time: float, 
