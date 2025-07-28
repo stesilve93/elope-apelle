@@ -5,10 +5,13 @@ weights:
   path: weights
 
   # Name of the model
-  name: elope-emmnet-v3-nopool
+  name: emmnet-transformer
 
   # Specify every how many epochs the model weights should be saved.
   checkpoint_epochs: 10
+  
+# Type of network model 
+model: emmnet-transformer
 
 # Set the type of IMU padding. Support values are "copy", "static". 
 # - copy simply fills unavailable states with a copy of the first available data. 
@@ -16,29 +19,25 @@ weights:
 padding: static 
 
 # Length of the states sequence
-sequence_length: 20
+sequence_length: 7
+
+# Sampling interval along the trajectory. It determines how many state points are 
+# retrieved from that trajectory. 
+sample_interval: 2
 
 # Type of normalization for the event tensor. Supported values are "null", "standard", 
 # or "minmax".
 event_normalization: "null"
 
-# True if the network should only provide the velocity as an input
-velocity_only: True
-
-# True if a physics-aware IMU encoder should be used
-physics_aware: False
-
-# True if attention should be used to determine the fusion strategy
-use_attention: True
+# Eventually reduce the event integration window w.r.t. the original input. This is valid 
+# only when the dataset is set to "last_timestamp".
+event_integration_window: 1e4
 
 # Dropout fraction for the model
 dropout: 0.15
 
 # Type of output, either "initial_state", "final_state", "central_state" or "sequence".
 output_type: final_state
-
-# True if the "no-pool" version should be used.
-use_nopool: True
 
 # Training losses settings
 losses:

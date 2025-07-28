@@ -99,10 +99,14 @@ else:
 
 events_cfg = dataset_cfg["events"]
 
+# Check whether the integration window should be updated 
+int_window = float(events_cfg["integration_window"])
+event_integration_window = model_cfg.get("event_integration_window", int_window)
+
 seq_loader = seq_cls(
     DATAPATH, 
     time_step=float(dataset_cfg.get("time_step", -1)),
-    event_integration_window=float(events_cfg["integration_window"]),
+    event_integration_window=float(event_integration_window),
     event_encoder_method=events_cfg["encoder_method"],
     event_clamp=int(events_cfg.get("clamp", -1)),
     event_H=int(events_cfg["height"]),

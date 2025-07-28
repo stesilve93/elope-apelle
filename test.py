@@ -5,6 +5,7 @@ import torch
 
 from pathlib import Path 
 
+from scipy.interpolate import PchipInterpolator
 from tabulate import tabulate
 
 from elope.datasets import EventProcessor, VariableSequenceLoader, FixedSequenceLoader
@@ -52,6 +53,9 @@ model_cfg = load_yaml(MODEL_CFG)
 # This script is working only for seq2one models 
 assert model_cfg["output_type"] != "sequence"
 
+# Ensure only velocity is predicted
+assert model_cfg.get("velocity_only", True) == True
+
 # Load the dataset config and create a Sequence Loader
 dataset_cfg = load_yaml(DATASET_CFG)
 events_cfg = dataset_cfg["events"]
@@ -61,12 +65,16 @@ if dataset_cfg["sequence_type"] == "fixed":
     seq_cls = FixedSequenceLoader
 else: 
     seq_cls = VariableSequenceLoader
+    
+# Check whether the integration window should be updated 
+int_window = float(events_cfg["integration_window"])
+event_integration_window = model_cfg.get("event_integration_window", int_window)
 
 # Create the sequence loader
 seq_loader = seq_cls(
     dataset_cfg["datapath"], 
     time_step=float(dataset_cfg.get("time_step", -1)),
-    event_integration_window=float(events_cfg["integration_window"]),
+    event_integration_window=float(event_integration_window),
     event_encoder_method=events_cfg["encoder_method"],
     event_clamp=int(events_cfg.get("clamp", -1)),
     event_H=int(events_cfg["height"]),
@@ -78,9 +86,6 @@ seq_loader = seq_cls(
 
 # Retrieve the type of event normalization 
 event_normalization = model_cfg["event_normalization"]
-
-# Check the model outputs only positions 
-assert model_cfg.get("velocity_only", True) == True
 
 # Create the network and retrieve the type of model output 
 out_type = model_cfg["output_type"]
@@ -125,8 +130,7 @@ for seq_id in seq_val:
     seq_dt = seq_loader.full_times[1] - seq_loader.full_times[0]
     
     # Initialize the arrays for the results
-    predictions, targets, times = [], [], []
-    rangemeters, angles = [], []
+    predictions, times = [], []
     
     for k in range(idx_beg, len(seq_loader)):
         
@@ -163,54 +167,55 @@ for seq_id in seq_val:
         # Check which output we need to retrieve 
         if out_type == "initial_state": 
             tms, states = tms[:, 0], states[:, 0]
-            imu, ranges = imu[:, 0], ranges[:, 0]
             
         elif out_type == "final_state": 
             tms, states = tms[:, -1], states[:, -1]
-            imu, ranges = imu[:, -1], ranges[:, -1]
             
         elif out_type == "central_state":
             ids = seq_loader.out_len // 2
             tms, states = tms[:, ids], states[:, ids]
-            imu, ranges = imu[:, ids], ranges[:, ids]
             
         elif out_type == "sequence":
             # We assume in this case we are using the last state predicted of the sequence
             pred_k = pred_k[:, -1]
             tms, states = tms[:, -1], states[:, -1]
-            imu, ranges = imu[:, -1], ranges[:, -1]
         
         # Store the predicted and ground-truth target values
         times.append(tms.cpu().numpy().squeeze())
-        targets.append(states.cpu().numpy().squeeze())
         predictions.append(pred_k.cpu().numpy().squeeze())
-            
-        # Store additional values 
-        rangemeters.append(ranges.cpu().numpy().squeeze())
-        angles.append(imu.cpu().numpy().squeeze()[:3])
         
     # Convert all the data into arrays
     predictions = np.array(predictions)
-    targets = np.array(targets)
-    times = np.array(times)
+    times = np.array(times)   
     
-    angles = np.array(angles)
-    rangemeters = np.array(rangemeters)
-        
+    # We need to interpolate the data at the IMU times
+    imu_tms = seq_loader.full_times 
+    targets = seq_loader.full_states
+    
+    # Interpolate the velocity at those times 
+    out_vel = np.stack([
+        PchipInterpolator(times, predictions[:, i])(imu_tms) for i in range(3)
+    ]).T.copy()
+
     if OUTPUT_ANALYTICAL_VZ: 
+        
+        angles = seq_loader.full_imu[:, 0:3]
+        rangemeters = PchipInterpolator(
+            seq_loader.full_rangemeter[:, 0], seq_loader.full_rangemeter[:, 1]
+        )(imu_tms) 
         
         # Replace the output velocity on the Z-direction with the one from the 
         # geometrical constraints 
         pos_z, vel_z = compute_posvelz(
-            times, rangemeters, angles, fp_window_length=30, fv_window_length=30
+            imu_tms, rangemeters, angles, fp_window_length=30, fv_window_length=30
         )
-        
+
         # Replace the network output with our data
-        predictions[:, -1] = vel_z
+        out_vel[:, -1] = vel_z
     
     # Compute the test metrics
     test_metrics = LunarTrainer.compute_metrics(
-        torch.tensor(predictions), 
+        torch.tensor(out_vel), 
         torch.tensor(targets), 
         velocity_only=model_cfg.get("velocity_only", True)
     )
@@ -223,17 +228,15 @@ for seq_id in seq_val:
     tab_values.append(seq_metrics)
     
     if SAVE_PLOTS: 
-        # Get the offest index
-        ioff = 0 if model_cfg.get("velocity_only", True) else 3
         
         # Create the plots with the predicted velocities 
         fig, axes = plt.subplots(nrows=3, figsize=(15,15), sharex=True)
         for i in range(3): 
             
-            axes[i].plot(times, targets[:, i+3], label='Target')
-            axes[i].plot(times, predictions[:, i+ioff], label='Prediction')
+            axes[i].plot(imu_tms, targets[:, i+3], label='Target')
+            axes[i].plot(imu_tms, out_vel[:, i], label='Prediction')
             axes[i].set_xlabel('Time (s)')
-            axes[i].set_xlim(times[0], times[-1])
+            axes[i].set_xlim(imu_tms[0], imu_tms[-1])
             gridminor(axes[i])
             
             axes[i].legend() 
@@ -241,7 +244,7 @@ for seq_id in seq_val:
         fig.tight_layout() 
         fig.savefig(PLOTS_PATH / f"{seq_id}.png", dpi=300)
         plt.close(fig)
-    
+        
     # Display the validation losses (e.g., each entry in the dictonary)
     loss_names = tuple(test_metrics.keys())
     loss_values = tuple([test_metrics[ln] for ln in loss_names])

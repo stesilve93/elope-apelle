@@ -3,3 +3,4 @@ from .emmnetOf import MultiModalVelocityEstimatorWithFlow
 from .emmnetVelGru import MultiModalVelocityEstimator
 from .emmnetVelGru_s2s import MultiModalVelocityEstimatorS2S
 from .emmnetVelGru_nopool import MultiModalVelocityEstimatorNoPool
+from .emmnetVelGruTransformer import MultiModalVelocityEstimatorTransformer

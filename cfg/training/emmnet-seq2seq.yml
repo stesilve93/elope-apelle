@@ -5,57 +5,48 @@ weights:
   path: weights
 
   # Name of the model
-  name: setnet-v1
+  name: emmnet-seq2seq
 
   # Specify every how many epochs the model weights should be saved.
   checkpoint_epochs: 10
 
 # Type of network model 
-model: setnet-v1
+model: emmnet-seq2seq
 
 # Set the type of IMU padding. Support values are "copy", "static". 
 # - copy simply fills unavailable states with a copy of the first available data. 
 # - static copies position/range/angles but sets velocity and angular velocity to zero.
 padding: static 
 
-# Length of the IMU sequence
-sequence_length: 15
+# Length of the states sequence
+sequence_length: 5
 
 # Sampling interval along the trajectory. It determines how many state points are 
 # retrieved from that trajectory. 
-sample_interval: 5
-
-# Type of output, either "initial_state", "final_state", "central_state" or "sequence".
-output_type: final_state
+sample_interval: 1
 
 # Type of normalization for the event tensor. Supported values are "null", "standard", 
 # or "minmax".
-event_normalization: "standard"
+event_normalization: "null"
 
 # Eventually reduce the event integration window w.r.t. the original input. This is valid 
 # only when the dataset is set to "last_timestamp".
-event_integration_window: 3e4
+event_integration_window: 1e4
+
+# True if the network should only provide the velocity as an input
+velocity_only: True
+
+# True if a physics-aware IMU encoder should be used
+physics_aware: False
+
+# True if attention should be used to determine the fusion strategy
+use_attention: True
 
 # Dropout fraction for the model
-dropout: 0.10
+dropout: 0.15
 
-# Network architecture 
-architecture: 
-
-  # Type of ResNet model used in the event encoder.
-  resnet_model: resnet-34 
-
-  # Hidden dimensions for the range embedding
-  range_channels: [16, 8]
-
-  # Hidden dimensions for the IMU embedder
-  imu_channels: [32, 16]
-
-  # Length of the event feature vector
-  event_output_dim: 256
-
-  # True if the timesteps should be stacked to the range and IMU tensors
-  stack_time: False
+# Type of output, either "initial_state", "final_state", "central_state" or "sequence".
+output_type: sequence
 
 # Training losses settings
 losses:
