@@ -226,7 +226,7 @@ class LunarTrainer:
             num_batches += 1
             
             if i % tbar.miniters == 0:
-                tbar.set_postfix(avg_loss=f"{running_loss/num_batches:.3f}")
+                tbar.set_postfix(avg_loss=f"{running_loss/num_batches:.6f}")
             
         return {
             'total_loss': running_loss / num_batches,
@@ -357,7 +357,7 @@ class LunarTrainer:
                 torch.save(self.model.state_dict(), save_path_model / f"{epoch}.pth")
                 print(
                     " "*6, f"Model weights saved! Val. Metric ({self.val_metric_key}): " 
-                    f"{val_loss:.4f} / Train Loss: {train_metrics['total_loss']:.4f}"
+                    f"{val_loss:.6f} / Train Loss: {train_metrics['total_loss']:.6f}"
                 )
                 
             # Save best model
@@ -366,7 +366,7 @@ class LunarTrainer:
                 torch.save(self.model.state_dict(), save_path_model / "best.pth")
                 print(
                     " "*6, f"New best model saved! Val. Metric ({self.val_metric_key}): "
-                    f"{val_loss:.4f} / Train Loss: {train_metrics['total_loss']:.4f}"
+                    f"{val_loss:.6f} / Train Loss: {train_metrics['total_loss']:.6f}"
                 )
                 
                 patience_counter = 0
