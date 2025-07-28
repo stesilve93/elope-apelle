@@ -12,10 +12,10 @@ from elope.trainers import LunarTrainer
 from elope.utils import LOGGER, load_yaml, increment_path
 
 # Path to the yaml file containing the dataset settings
-DATASET_CFG = "cfg/dataset/dataset-fix-last-1us.yml"
+DATASET_CFG = "cfg/dataset/dataset-fix-01-last.yml"
 
 # Path to the yaml file containing the model settings
-MODEL_CFG = "cfg/training/emmnet-v3-nopool.yml"
+MODEL_CFG = "cfg/training/emmnet-nopool.yml"
 
 # Device configuration 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -36,7 +36,13 @@ dataset_cfg = load_yaml(DATASET_CFG)
 sequence_length = int(model_cfg["sequence_length"])
 padding = str(model_cfg["padding"])
 event_norm = str(model_cfg["event_normalization"])
+event_encoder = dataset_cfg["events"]["encoder_method"]
 
+event_integration_window = float(model_cfg.get("event_integration_window", None))
+if (event_integration_window != None and event_encoder != "last_timestamp"): 
+    LOGGER.warning(f"Cannot resize the window with encoder `{event_encoder}`. Resetting.")
+    event_integration_window = None
+    
 # Create the PyTorch's dataloaders
 train_loader = ElopeDataLoader(
     DATASET_CFG,
@@ -44,6 +50,7 @@ train_loader = ElopeDataLoader(
     sample_len=sequence_length,
     padding=padding,
     event_normalization=event_norm,
+    event_integration_window=event_integration_window,
     augment=True, 
     flip=0.0,
     batch_size=32,
@@ -60,6 +67,7 @@ val_loader = ElopeDataLoader(
     sample_len=sequence_length,
     padding=padding,
     event_normalization=event_norm,
+    event_integration_window=event_integration_window,
     augment=False,
     flip=0.0,
     batch_size=32, 
