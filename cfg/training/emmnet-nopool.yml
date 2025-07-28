@@ -5,10 +5,13 @@ weights:
   path: weights
 
   # Name of the model
-  name: elope-emmnet-v1
+  name: emmnet-nopool
 
   # Specify every how many epochs the model weights should be saved.
   checkpoint_epochs: 10
+
+# Type of network model 
+model: emmnet-nopool
 
 # Set the type of IMU padding. Support values are "copy", "static". 
 # - copy simply fills unavailable states with a copy of the first available data. 
@@ -18,9 +21,17 @@ padding: static
 # Length of the states sequence
 sequence_length: 5
 
+# Sampling interval along the trajectory. It determines how many state points are 
+# retrieved from that trajectory. 
+sample_interval: 1
+
 # Type of normalization for the event tensor. Supported values are "null", "standard", 
 # or "minmax".
 event_normalization: "null"
+
+# Eventually reduce the event integration window w.r.t. the original input. This is valid 
+# only when the dataset is set to "last_timestamp".
+event_integration_window: 1e4
 
 # True if the network should only provide the velocity as an input
 velocity_only: True
