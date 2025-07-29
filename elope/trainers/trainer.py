@@ -383,7 +383,9 @@ class LunarTrainer:
             print("\n")
 
             if patience_counter >= max_patience:
-                LOGGER.warning("Early stopping triggered. No improvement for 10 epochs.")
+                LOGGER.warning(
+                    "Early stopping triggered. No improvement for {max_patience} epochs."
+                )
                 break
 
     def plot_training(
