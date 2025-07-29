@@ -67,7 +67,7 @@ class SequenceLoader(ABC):
         
         # Check that the event inputs make sense
         assert event_encoder_method in (
-            "first_timestamp", "last_timestamp", "timestamp", "count", "hybrid"
+            "first_timestamp", "last_timestamp", "timestamp", "count", "hybrid", "evflownet"
         )
         
         self.event_integration_window = float(event_integration_window)
@@ -80,8 +80,10 @@ class SequenceLoader(ABC):
                 f"Event encoder {self.event_encoder_method} supports only 1 event channel."
             )
                 
-        elif self.event_encoder_method == "timestamp" and self.T != 2: 
-            raise ValueError("Event encoder `timestamp` supports only 2 event channels.")
+        elif self.event_encoder_method in ("timestamp", "evflownet") and self.T != 2: 
+            raise ValueError(
+                f"Event encoder `{self.event_encoder_method}` supports only 2 channels."
+            )
         
         elif self.event_encoder_method == "hybrid" and self.T != 3: 
             raise ValueError("Event encoder `hybrid` supports only 3 event channels.")
