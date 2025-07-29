@@ -13,6 +13,9 @@ weights:
 # Type of network model 
 model: emmnet-evflownet
 
+# Path to the PyTorch file containing the network weights
+evflownet_weights: weights/evflownet/evflownet.pth
+
 # Set the type of IMU padding. Support values are "copy", "static". 
 # - copy simply fills unavailable states with a copy of the first available data. 
 # - static copies position/range/angles but sets velocity and angular velocity to zero.
@@ -29,9 +32,9 @@ sample_interval: 1
 # or "minmax".
 event_normalization: "null"
 
-# Eventually reduce the event integration window w.r.t. the original input. This is valid 
-# only when the dataset is set to "last_timestamp".
-event_integration_window: 5e5
+# # Eventually reduce the event integration window w.r.t. the original input. This is valid 
+# # only when the dataset is set to "last_timestamp".
+# event_integration_window: 5e5
 
 # Dropout fraction for the model
 dropout: 0.15

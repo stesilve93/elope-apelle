@@ -36,6 +36,9 @@ def build_model(
         elif model == "emmnet-transformer": 
             return MultiModalVelocityEstimatorTransformer.create_model(cfg_model, device)
         
+        elif model == "emmnet-evflownet": 
+            return MultiModalVelocityEstimatorEVFlow.create_model(cfg_model, device)
+        
         else: 
             raise ValueError(f"Unsupported emmnet model: {model}")
     
