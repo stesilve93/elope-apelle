@@ -30,7 +30,7 @@ events:
   # Vertical dimension of the image, in pixels.
   height: 200
   # Dimension for the event tensor (i.e., number of time bins)
-  channels: 3
+  channels: 2
 
   # Type of event encoding, either "count", "last_timestamp", "first_timestamp", 
   # "timestamp", "hybrid" or "evflownet"
