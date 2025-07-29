@@ -1,7 +1,6 @@
 
 import math
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -48,59 +47,61 @@ class EVFLowNetEncoder(nn.Module):
 
     def __init__(
         self, 
+        weights_path: str, 
         output_dim: int = 128, 
         dropout: float = 0.15
     ):
         # Initialize the base class
         super().__init__()
         
-        # # Initial convolution with stochastic depth
-        # # The kernel size is (3,7,7) to capture the spatial and temporal
-        # # information in the event data
-        # self.conv1 = nn.Conv3d(input_channels, 64, kernel_size=(3,7,7), 
-        #                       stride=(1,2,2), padding=(1,3,3), bias=False)
-        # # Batch normalization to normalize the output of the convolution
-        # self.bn1 = nn.BatchNorm3d(64)
-        # # Max pooling to downsample the data
-        # self.maxpool = nn.MaxPool3d(kernel_size=(1,3,3), stride=(1,2,2), padding=(0,1,1))
+        # Initialize the EVFlowNet model
+        self.evflownet = EVFlowNet(batch_norm=True)
         
-        # # ResNet blocks with increased dropout
-        # self.layer1 = self._make_layer(64, 64, 2, stride=1, dropout=dropout)
-        # self.layer2 = self._make_layer(64, 128, 2, stride=(1,2,2), dropout=dropout)
-        # self.layer3 = self._make_layer(128, 256, 2, stride=(1,2,2), dropout=dropout)
-        # self.layer4 = self._make_layer(256, 512, 2, stride=(1,2,2), dropout=dropout)
+        # Load the pre-trained model 
+        assert weights_path.exists() == True 
+        data = torch.load(weights_path)
+        self.evflownet.load_state_dict(data)
         
-        # Global pooling and projection with regularization
-        # The AdaptiveAvgPool3d is used to reduce the spatial and temporal
-        # dimensions to 1
-        self.avgpool = nn.AdaptiveAvgPool3d((1, 1, 1))
+        # Number of output channels at the first decoder layer
+        cout = 1024
+        
         # The output is flattened and passed through a fully connected layer
         # with a dropout layer to reduce overfitting
         self.fc = nn.Sequential(
             nn.Dropout(dropout * 2),
-            nn.Linear(512, output_dim),
+            nn.Linear(cout, 128),
             nn.LayerNorm(output_dim)  # Layer norm for better stability
         )
     
-    
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> dict:
+                         
+        # x is of shape (B, 2, C, H, W)
+        B, _, C, H, W = x.shape
+
+        # Invert the dimensions to have the channels (counts, stamps) on the first dim
+        x = x.permute(0, 2, 3, 4, 1)
         
-        raise NotImplementedError
-        return x         
-    
-        # x = F.relu(self.bn1(self.conv1(x)))
-        # x = self.maxpool(x)
+        # Reshape to (B, 2*2, 200, 200)
+        x = x.view(x, 4, H, W)
+            
+        # Upsample the images to ensure the shape matches the one expected from the model
+        x = F.interpolate(x, size=(256, 256), mode="bilinear", align_corners=False)
         
-        # x = self.layer1(x)
-        # x = self.layer2(x)
-        # x = self.layer3(x)
-        # x = self.layer4(x)
+        # Reshape back to (B, C, 256, 256, 2)
+        x = x.view(B, C, 256, 256, 2)
         
-        # x = self.avgpool(x)
-        # x = torch.flatten(x, 1)
-        # x = self.fc(x)
+        # Run the EVFlowNet model on the input
+        dict_flow = self.evflownet(x)
         
-        # return x
+        # Extract the optical flow from the first decoder layer 
+        feats = dict_flow["flow0"] # (B, 2, 32, 32)
+        
+        # Flatten the x-y coordinates
+        feats = feats.reshape(B, 2, -1) # (B, 2, 1024)
+        
+        # Pass through the FC layer 
+        feats = self.fc(feats) # (B, 2, 128)        
+        return dict_flow, feats    
 
 
 class TransformerIMUEncoder(nn.Module):
@@ -236,11 +237,13 @@ class CrossModalAttention(nn.Module):
             # Normalize the projected features
             nn.LayerNorm(hidden_dim)
         )
+        
         self.imu_proj = nn.Sequential(
             nn.Linear(imu_dim, hidden_dim),
             # Normalize the projected features
             nn.LayerNorm(hidden_dim)
         )
+        
         self.range_proj = nn.Sequential(
             nn.Linear(range_dim, hidden_dim),
             # Normalize the projected features
@@ -269,18 +272,18 @@ class CrossModalAttention(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
         # Learnable weights for each modality
-        #self.modal_weights = nn.Parameter(torch.ones(3)) # Learnable weights for each modality
+        #self.modal_weights = nn.Parameter(torch.ones(4)) # Learnable weights for each modality
 
         
     def forward(self, event_feat, imu_feat, range_feat) -> tuple:
         
         # Project features
-        e_proj = self.event_proj(event_feat)
-        i_proj = self.imu_proj(imu_feat)
-        r_proj = self.range_proj(range_feat)
+        e_proj = self.event_proj(event_feat)    # (B, 2, D)
+        i_proj = self.imu_proj(imu_feat)        # (B, D)
+        r_proj = self.range_proj(range_feat)    # (B, D)
         
         # Stack for attention (seq_len=3, batch, hidden_dim)
-        features = torch.stack([e_proj, i_proj, r_proj], dim=0)
+        features = torch.stack([e_proj[:, 0], e_proj[:, 1], i_proj, r_proj], dim=0)
 
         # Self-attention with residual
         attended, attention_weights = self.attention(features, features, features)
@@ -292,8 +295,8 @@ class CrossModalAttention(nn.Module):
         
         # Use learnable weights if available, otherwise simple average
         if hasattr(self, 'modal_weights'):
-            weights = F.softmax(self.modal_weights, dim=0)  # (3,)
-            fused = torch.sum(ffn_out * weights.view(3, 1, 1), dim=0)  # Weighted sum
+            weights = F.softmax(self.modal_weights, dim=0)  # (4,)
+            fused = torch.sum(ffn_out * weights.view(4, 1, 1), dim=0)  # Weighted sum
         else:
             fused = torch.mean(ffn_out, dim=0)  # Simple average fallback
         
@@ -369,12 +372,11 @@ class MultiModalVelocityEstimatorEVFlow(nn.Module):
         super().__init__()
         
         # Initialize  encoders with dropout for regularization
-        # TODO: update
-        # self.event_encoder = EventEncoder(
-        #     event_channels, 
-        #     event_output_dim, 
-        #     dropout
-        # )
+        self.event_encoder = EVFLowNetEncoder(
+            weights_path=evflownet_weights,
+            output_dim=output_dim,
+            dropout=dropout
+        )
         
         # Initialize IMU encoder
         self.imu_encoder = TransformerIMUEncoder(
@@ -428,23 +430,33 @@ class MultiModalVelocityEstimatorEVFlow(nn.Module):
         (0.5) and kaiming_normal initialization for convolutional layers.
         """
         for module in self.modules():
+            
             if isinstance(module, nn.Linear):
                 # Initialize weights using Xavier initialization with a smaller gain (0.5)
                 nn.init.xavier_uniform_(module.weight, gain=0.5)
                 if module.bias is not None:
                     # Initialize bias to zero
                     nn.init.constant_(module.bias, 0)
+                    
             elif isinstance(module, (nn.Conv3d, nn.Conv2d, nn.Conv1d)):
                 # Initialize weights using kaiming_normal initialization
                 nn.init.kaiming_normal_(module.weight, mode='fan_out', nonlinearity='relu')
     
     def forward(self, times, event_tensor, imu_tensor, range_tensor):
         
+        # Times is a tensor of size (B, T) 
+        # Event is a tensor of size (B, T, 2, C, H, W)
+        # IMU is a tensor of size (B, T, 6)
+        # Rangemeter is a tensor of size (B, T, 1)
+        
+        # Keep only the events of the last state
+        event_tensor = event_tensor[:, -1]
+        
         # Adjust times dimension
         times = times.unsqueeze(2)
 
         # Extract features
-        event_feat = self.event_encoder(event_tensor)
+        flow, event_feat = self.event_encoder(event_tensor)
 
         imu_feat = self.imu_encoder(imu_tensor)
         range_feat = self.range_encoder(range_tensor)
@@ -461,4 +473,5 @@ class MultiModalVelocityEstimatorEVFlow(nn.Module):
             'imu_features': imu_feat,
             'range_features': range_feat,
             'attention_weights': attention_weights,
+            'optical_flow': flow,
         }
