@@ -79,16 +79,11 @@ class EVFLowNetEncoder(nn.Module):
         B, _, C, H, W = x.shape
 
         # Invert the dimensions to have the channels (counts, stamps) on the first dim
-        x = x.permute(0, 2, 3, 4, 1)
-        
-        # Reshape to (B, 2*2, 200, 200)
-        x = x.view(x, 4, H, W)
+        x = x.permute(0, 2, 1, 3, 4) # (B, C, 2, H, W)
+        x = x.reshape(B, -1, H, W)   # (B, 2*C, H, W)
             
         # Upsample the images to ensure the shape matches the one expected from the model
         x = F.interpolate(x, size=(256, 256), mode="bilinear", align_corners=False)
-        
-        # Reshape back to (B, C, 256, 256, 2)
-        x = x.view(B, C, 256, 256, 2)
         
         # Run the EVFlowNet model on the input
         dict_flow = self.evflownet(x)
