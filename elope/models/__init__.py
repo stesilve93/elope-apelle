@@ -1,4 +1,5 @@
 
+import torch
 from torch import nn
 
 from .emmnet import * 
@@ -37,8 +38,21 @@ def build_model(
             return MultiModalVelocityEstimatorTransformer.create_model(cfg_model, device)
         
         elif model == "emmnet-evflownet": 
-            return MultiModalVelocityEstimatorEVFlow.create_model(cfg_model, device)
-        
+            model = MultiModalVelocityEstimatorEVFlow.create_model(cfg_model, device)
+
+            # Update the EVFlowNet weights
+            weights_path = cfg_model["evflownet_weights"]
+            data = torch.load(weights_path)
+            model.event_encoder.evflownet.load_state_dict(data)
+            
+            # Check whether to freeze the weights
+            if cfg_model["freeze_weights"]:
+                model.event_encoder.evflownet.eval() 
+                for p in model.event_encoder.evflownet.parameters(): 
+                    p.requires_grad = False
+            
+            return model
+
         else: 
             raise ValueError(f"Unsupported emmnet model: {model}")
     

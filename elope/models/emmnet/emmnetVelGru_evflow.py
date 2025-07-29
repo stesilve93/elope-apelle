@@ -7,40 +7,10 @@ import torch.nn.functional as F
 
 from pathlib import Path
 
+from elope.models.blocks import vAPE
 from elope.evflow import EVFlowNet
 from elope.utils import load_yaml
 
-class PositionalEncoding(nn.Module):
-    """Positional encoding for transformer-based encoders"""
-    """
-    Positional encoding for transformer-based encoders
-    """
-    def __init__(self, d_model: int, max_len: int = 5000):
-        """
-        Initialize the PositionalEncoding module
-
-        Args:
-        d_model (int): The number of features in the model
-        max_len (int, optional): The maximum length of the input sequence. Defaults to 5000.
-        """
-        super().__init__()
-        # Create a tensor of shape (max_len, d_model) filled with zeros
-        pe = torch.zeros(max_len, d_model)
-        # Create a tensor of shape (max_len) with the position of each element
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        # Create a tensor of shape (d_model/2) with the divisors for the sine and cosine
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * 
-                           (-math.log(10000.0) / d_model))
-        # Fill the pe tensor with the sine and cosine of the position
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        # Reshape the tensor to (1, max_len, d_model)
-        pe = pe.unsqueeze(0).transpose(0, 1)
-        # Register the tensor as a buffer
-        self.register_buffer('pe', pe)
-
-    def forward(self, x):
-        return x + self.pe[:x.size(0), :]
 
 
 class EVFLowNetEncoder(nn.Module):
@@ -48,6 +18,7 @@ class EVFLowNetEncoder(nn.Module):
     def __init__(
         self, 
         weights_path: str, 
+        freeze_weights: bool = False,
         output_dim: int = 128, 
         dropout: float = 0.15
     ):
@@ -61,15 +32,17 @@ class EVFLowNetEncoder(nn.Module):
         assert weights_path.exists() == True 
         data = torch.load(weights_path)
         self.evflownet.load_state_dict(data)
-        
+
         # Number of output channels at the first decoder layer
-        cout = 1024
+        cout = 2048
         
         # The output is flattened and passed through a fully connected layer
         # with a dropout layer to reduce overfitting
         self.fc = nn.Sequential(
             nn.Dropout(dropout * 2),
-            nn.Linear(cout, 128),
+            nn.Linear(cout, 512),
+            nn.GELU(), 
+            nn.Linear(512, output_dim),
             nn.LayerNorm(output_dim)  # Layer norm for better stability
         )
     
@@ -92,10 +65,10 @@ class EVFLowNetEncoder(nn.Module):
         feats = dict_flow["flow0"] # (B, 2, 32, 32)
         
         # Flatten the x-y coordinates
-        feats = feats.reshape(B, 2, -1) # (B, 2, 1024)
+        feats = feats.reshape(B, -1) # (B, 2048)
         
         # Pass through the FC layer 
-        feats = self.fc(feats) # (B, 2, 128)        
+        feats = self.fc(feats) # (B, 128)        
         return dict_flow, feats    
 
 
@@ -103,6 +76,7 @@ class TransformerIMUEncoder(nn.Module):
 
     def __init__(
         self, 
+        sequence_len: int,
         input_dim: int = 6, 
         d_model: int = 64, 
         output_dim: int = 32, 
@@ -116,7 +90,7 @@ class TransformerIMUEncoder(nn.Module):
         
         # Input projection
         self.input_proj = nn.Linear(input_dim, d_model)
-        self.pos_encoding = PositionalEncoding(d_model)
+        self.pos_encoding = vAPE(d_model, max_len=sequence_len)
         
         # Transformer encoder
         encoder_layer = nn.TransformerEncoderLayer(
@@ -145,9 +119,7 @@ class TransformerIMUEncoder(nn.Module):
         x = self.input_proj(x) * math.sqrt(self.d_model)
         
         # Add positional encoding
-        x = x.transpose(0, 1)  # (T, B, d_model) for pos encoding
         x = self.pos_encoding(x)
-        x = x.transpose(0, 1)  # Back to (B, T, d_model)
         
         # Apply transformer
         x = self.transformer(x)
@@ -263,22 +235,23 @@ class CrossModalAttention(nn.Module):
         # Layer normalization for stabilizing the learning process
         self.norm1 = nn.LayerNorm(hidden_dim)
         self.norm2 = nn.LayerNorm(hidden_dim)
+        
         # Dropout regularization
         self.dropout = nn.Dropout(dropout)
 
         # Learnable weights for each modality
-        #self.modal_weights = nn.Parameter(torch.ones(4)) # Learnable weights for each modality
+        self.modal_weights = nn.Parameter(torch.ones(3)) 
 
         
     def forward(self, event_feat, imu_feat, range_feat) -> tuple:
         
         # Project features
-        e_proj = self.event_proj(event_feat)    # (B, 2, D)
+        e_proj = self.event_proj(event_feat)    # (B, D)
         i_proj = self.imu_proj(imu_feat)        # (B, D)
         r_proj = self.range_proj(range_feat)    # (B, D)
         
         # Stack for attention (seq_len=3, batch, hidden_dim)
-        features = torch.stack([e_proj[:, 0], e_proj[:, 1], i_proj, r_proj], dim=0)
+        features = torch.stack([e_proj, i_proj, r_proj], dim=0) # (3, B, D)
 
         # Self-attention with residual
         attended, attention_weights = self.attention(features, features, features)
@@ -289,12 +262,12 @@ class CrossModalAttention(nn.Module):
         ffn_out = self.norm2(ffn_out + attended)
         
         # Use learnable weights if available, otherwise simple average
-        if hasattr(self, 'modal_weights'):
-            weights = F.softmax(self.modal_weights, dim=0)  # (4,)
-            fused = torch.sum(ffn_out * weights.view(4, 1, 1), dim=0)  # Weighted sum
-        else:
-            fused = torch.mean(ffn_out, dim=0)  # Simple average fallback
-        
+        # if hasattr(self, 'modal_weights'):
+            # weights = F.softmax(self.modal_weights, dim=0)  # (4,)
+            # fused = torch.sum(ffn_out * weights.view(4, 1, 1), dim=0)  # Weighted sum
+        # else:
+        fused = torch.mean(ffn_out, dim=0)  # Simple average fallback
+    
         return fused, attention_weights
 
 
@@ -356,7 +329,9 @@ class MultiModalVelocityEstimatorEVFlow(nn.Module):
     """ Multi-modal network with better regularization"""
     def __init__(
         self, 
+        sequence_len: int,
         evflownet_weights: str, 
+        freeze_weights: bool = False,
         event_output_dim: int = 128,
         imu_output_dim: int = 32,
         range_output_dim: int = 16,
@@ -369,12 +344,14 @@ class MultiModalVelocityEstimatorEVFlow(nn.Module):
         # Initialize  encoders with dropout for regularization
         self.event_encoder = EVFLowNetEncoder(
             weights_path=evflownet_weights,
-            output_dim=output_dim,
+            freeze_weights=freeze_weights,
+            output_dim=event_output_dim,
             dropout=dropout
         )
         
         # Initialize IMU encoder
         self.imu_encoder = TransformerIMUEncoder(
+            sequence_len=sequence_len,
             output_dim=imu_output_dim, 
             dropout=dropout
         )
@@ -386,14 +363,14 @@ class MultiModalVelocityEstimatorEVFlow(nn.Module):
         )
 
         # Use cross-modal attention mechanism for feature fusion
+        fusion_input_dim = 128  # Hidden dimension for attention
         self.fusion = CrossModalAttention(
             event_output_dim, 
             imu_output_dim, 
             range_output_dim, 
+            hidden_dim=fusion_input_dim,
             dropout=dropout, 
         )
-        
-        fusion_input_dim = 128  # Hidden dimension for attention
 
         # Initialize regularized regressor for final prediction
         self.regressor = RegularizedRegressor(fusion_input_dim, output_dim, dropout)
@@ -411,7 +388,9 @@ class MultiModalVelocityEstimatorEVFlow(nn.Module):
         
         model = MultiModalVelocityEstimatorEVFlow(
             dropout=float(cfg["dropout"]),
+            sequence_len=int(cfg["sequence_length"]),
             evflownet_weights=Path(cfg["evflownet_weights"]),
+            freeze_weights=cfg.get("freeze_evflownet", False),
             **kwargs
         )
         
@@ -434,9 +413,10 @@ class MultiModalVelocityEstimatorEVFlow(nn.Module):
                     nn.init.constant_(module.bias, 0)
                     
             elif isinstance(module, (nn.Conv3d, nn.Conv2d, nn.Conv1d)):
+                
                 # Initialize weights using kaiming_normal initialization
                 nn.init.kaiming_normal_(module.weight, mode='fan_out', nonlinearity='relu')
-    
+
     def forward(self, times, event_tensor, imu_tensor, range_tensor):
         
         # Times is a tensor of size (B, T) 
@@ -457,7 +437,7 @@ class MultiModalVelocityEstimatorEVFlow(nn.Module):
         range_feat = self.range_encoder(range_tensor)
         
         # Fusion
-        fused_feat, attention_weights = self.fusion(event_feat, imu_feat, range_feat)
+        fused_feat, _ = self.fusion(event_feat, imu_feat, range_feat)
 
         # Final prediction
         output = self.regressor(fused_feat)
@@ -467,6 +447,5 @@ class MultiModalVelocityEstimatorEVFlow(nn.Module):
             'event_features': event_feat,
             'imu_features': imu_feat,
             'range_features': range_feat,
-            'attention_weights': attention_weights,
             'optical_flow': flow,
         }

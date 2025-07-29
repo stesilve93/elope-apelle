@@ -16,13 +16,16 @@ model: emmnet-evflownet
 # Path to the PyTorch file containing the network weights
 evflownet_weights: weights/evflownet/evflownet.pth
 
+# Freeze the EVFlownet weights
+freeze_weights: False
+
 # Set the type of IMU padding. Support values are "copy", "static". 
 # - copy simply fills unavailable states with a copy of the first available data. 
 # - static copies position/range/angles but sets velocity and angular velocity to zero.
 padding: static 
 
 # Length of the states sequence
-sequence_length: 3
+sequence_length: 5
 
 # Sampling interval along the trajectory. It determines how many state points are 
 # retrieved from that trajectory. 
@@ -37,7 +40,7 @@ event_normalization: "null"
 # event_integration_window: 5e5
 
 # Dropout fraction for the model
-dropout: 0.15
+dropout: 0.20
 
 # Type of output, either "initial_state", "final_state", "central_state" or "sequence".
 output_type: final_state
