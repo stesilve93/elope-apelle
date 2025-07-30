@@ -52,6 +52,9 @@ def build_model(
                     p.requires_grad = False
             
             return model
+        
+        elif model == "emmnet-horizontal": 
+            return MultiModalVelocityEstimatorHorizontal.create_model(cfg_model, device)
 
         else: 
             raise ValueError(f"Unsupported emmnet model: {model}")

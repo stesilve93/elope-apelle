@@ -52,6 +52,9 @@ class LunarTrainer:
         # Store the name of the metric used to identify the best model 
         self.val_metric_key = val_metric
         
+        # Retrieve whether the target states should be given in input
+        self.pass_target = self.cfg.get("pass_target", False)
+        
         # Retrieve which state the model gives in output 
         self.output_type = self.cfg["output_type"]
         assert self.output_type in (
@@ -199,12 +202,18 @@ class LunarTrainer:
             self.optimizer.zero_grad()
             
             # Forward pass
-            outputs = self.model(times, events, imu, rangemeter)
+            if self.pass_target: 
+                # Pass knowledge of the ground-truth vector to the network
+                outputs = self.model(times, events, imu, rangemeter, targets)
+            else: 
+                outputs = self.model(times, events, imu, rangemeter)
+            
             predictions = outputs['prediction']
             
             # Compute loss
             loss_dict = self.weighted_pose_loss(predictions, targets)
             loss = loss_dict['total_loss']
+            
             # FIXME: Add kinematic loss to the standard structure if useful!! It seems not really effective :(
             #loss = loss_dict['total_loss'] + outputs['kin_loss'] if 'kin_loss' in outputs else 0
 
