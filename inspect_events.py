@@ -87,7 +87,7 @@ def events_stamp_to_image(
     polarity: str, 
     grayscale: bool=False, 
     bg_white: bool=False,
-) -> Image: 
+) -> Image.Image: 
     
     # Check only one polarity is selected
     assert polarity in ("positive", "negative")
@@ -162,61 +162,31 @@ def frames_to_gif(
 ): 
     
     # Ensure frame is a list
-    if isinstance(frames[0], Image): 
+    if isinstance(frames[0], Image.Image): 
         frames = [frames]
             
-    # We display two gifs together 
-    outframes = []
-    
     # Recover the size of the first frame 
-    h, w = frames[0][0].width, frames[0][0].height
+    h, w = frames[0][0].height, frames[0][0].width
     
     # Create the starting points for each sub-gif 
     xy = []
     for row in range(nrows): 
         for col in range(ncols): 
-            xy.append(((nrows-row-1)*height, col*width))
+            xy.append((col*w, (nrows-row-1)*h))
 
-        
+    outframes = []
     for fs in zip(*frames): 
+        # Create a new image and past all the differnet frames
+        img = Image.new("RGBA", (w*ncols, h*nrows))
+        for (k, fk) in enumerate(fs): 
+            img.paste(fk.convert("RGBA"), xy[k])
         
-        img = Image.new("RGBA", h*nrows, w*ncols)
-        for f in fs: 
+        outframes.append(img) 
         
-        
-        
-    
-        for fs in zip(*frames):
-            
-            f1, f2 = fs[:2]
-            f1 = f1.convert("RGBA")
-            f2 = f2.convert("RGBA")
-            
-            w = f1.width + f2.width
-            h = max(f1.height, f2.height)
-            
-            if len(fs) == 3:
-                f3 = fs[-1]
-                
-                w = w + f3.width 
-                h = max(h, f3.width)
-            
-            f = Image.new("RGBA", (w, h))
-            
-            f.paste(f1, (0,0))
-            f.paste(f2, (f1.width, 0))
-            
-            if len(fs) == 3: 
-                f.paste(f3, (f1.width + f2.width, 0))
-            
-            outframes.append(f) 
-        
-        frames = outframes        
-    
-    frames[0].save(
+    outframes[0].save(
         filename, 
         save_all=True, 
-        append_images=frames[1:], 
+        append_images=outframes[1:], 
         loop=loop,
         **kwargs
     )
@@ -258,7 +228,7 @@ if USE_EVFLOW:
     model = model.to(device)
 
 sequences = [str(i).zfill(4) for i in range(28)]
-for SEQUENCE_ID in sequences: 
+for SEQUENCE_ID in sequences[:1]: 
         
     # Load the sequence data
     data = np.load(SEQUENCE_PATH / (SEQUENCE_ID + ".npz"))
@@ -318,4 +288,33 @@ for SEQUENCE_ID in sequences:
 
         frames.append(img_flow)
 
-    frames_to_gif(SAVE_PATH / f"{SEQUENCE_ID}.gif", tuple(frames), duration=3, loop=0)
+    # Save the output to a .GIF file
+    frames_to_gif(
+        SAVE_PATH / f"{SEQUENCE_ID}.gif", 
+        tuple(frames),
+        nrows=1, 
+        ncols=3, 
+        duration=3, 
+        loop=0
+    )
+    
+# du = - f/Z*vx + 0*vy   + u/Z*vz + uv/f*wx        - (f + u^2/f)*wy + v*wz 
+# dv =     0*vx - f/Z*vy - v/Z*vz + (f + v^2/f)*wx - uv/f*wy        - u*wz
+
+# du = dut + uv/f*wx        - (f + u^2/f)*wy + v*wz 
+# dv = dvt + (f + v^2/f)*wx - uv/f*wy        - u*wz
+
+# dut = du - uv/f*wx        + (f + u^2/f)*wy - v*wz
+# dvt = dv - (f + v^2/f)*wx + uv/f*wy        + u*wz
+
+# uv sono le coordinate del punto che dipendono dall'intrinsic matrix 
+# K = [fx, 0, cx, 
+#      0, fy, cy,
+#      0   0  1]
+
+# i = 
+# j = 
+
+        #  [self._f[0], 0.0, self._p[0]], 
+        #     [0.0, self._f[1], self._p[1]], 
+        #     [0.0, 0.0, 1.0]
