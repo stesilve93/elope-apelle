@@ -271,7 +271,11 @@ class LunarTrainer:
                 imu = imu.to(self.device)
                 
                 # Run inference
-                outputs = self.model(times, events, imu, rangemeter)
+                if self.pass_target:
+                    outputs = self.model(times, events, imu, rangemeter, targets)
+                else: 
+                    outputs = self.model(times, events, imu, rangemeter)
+                    
                 predictions = outputs['prediction']
                 
                 # Compute the loss 
