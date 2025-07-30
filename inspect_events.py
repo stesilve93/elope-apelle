@@ -152,14 +152,40 @@ def collect_events(
 
     return np.stack(stack_count), np.stack(stack_stamp), 
 
-def frames_to_gif(filename: str, frames: list | tuple, loop=0, **kwargs): 
+def frames_to_gif(
+    filename: str, 
+    frames: list | tuple, 
+    nrows: int=1, 
+    ncols: int=1, 
+    loop: int=0, 
+    **kwargs
+): 
     
-    if isinstance(frames, tuple) and isinstance(frames[0], list):
+    # Ensure frame is a list
+    if isinstance(frames[0], Image): 
+        frames = [frames]
+            
+    # We display two gifs together 
+    outframes = []
+    
+    # Recover the size of the first frame 
+    h, w = frames[0][0].width, frames[0][0].height
+    
+    # Create the starting points for each sub-gif 
+    xy = []
+    for row in range(nrows): 
+        for col in range(ncols): 
+            xy.append(((nrows-row-1)*height, col*width))
+
         
-        assert len(frames) <= 3
+    for fs in zip(*frames): 
         
-        # We display two gifs together 
-        outframes = []
+        img = Image.new("RGBA", h*nrows, w*ncols)
+        for f in fs: 
+        
+        
+        
+    
         for fs in zip(*frames):
             
             f1, f2 = fs[:2]
