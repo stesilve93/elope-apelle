@@ -4,6 +4,7 @@ from torch import nn
 
 from .emmnet import * 
 from .setnet import * 
+from .nonet import *
 
 def build_model(
     cfg_model: dict,
@@ -71,6 +72,24 @@ def build_model(
             
         else: 
             raise ValueError(f"Unsupported setnet model: {model}")
+    
+    elif "nonet" in model: 
+        
+        if model == "nonet-v1": 
+            # Create the model
+            model = NoFlowNet.create_model(cfg_model, device=device)
+
+            # Update the EVFlowNet weights 
+            weights_path = cfg_model["evflownet_weights"]
+            data = torch.load(weights_path) 
+            model.evflownet.model.load_state_dict(data)
+            
+            # Check whether to freeze the weights: 
+            if cfg_model["freeze_weights"]: 
+                model.evflownet.freeze_weights() 
+                
+            return model
+            
     
     else: 
         raise ValueError(f"Unrecognised network model: {model}")
