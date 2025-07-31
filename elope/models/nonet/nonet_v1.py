@@ -329,7 +329,8 @@ class NoFlowNet(nn.Module):
         
         # Keep only the last tensor for the events 
         event_tensor = event_tensor[:, -1]  # (B, 2, C, H, W)
-
+        range_tensor = range_tensor[:, -1]  # (B, 1)
+        
         # Keep only the first angular velocity 
         w_tensor = imu_tensor[:, -1, 3:6]   # (B, 3)
 
