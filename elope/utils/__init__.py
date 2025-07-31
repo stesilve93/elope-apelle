@@ -16,4 +16,6 @@ from .misc import (
 
 from .logger import LOGGER
 
+from .logic import *
+
 from .plots import gridminor
