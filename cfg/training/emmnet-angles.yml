@@ -5,19 +5,13 @@ weights:
   path: weights
 
   # Name of the model
-  name: emmnet-evflownet
+  name: emmnet-angles
 
   # Specify every how many epochs the model weights should be saved.
   checkpoint_epochs: 10
 
 # Type of network model 
-model: emmnet-evflownet
-
-# Path to the PyTorch file containing the network weights
-evflownet_weights: weights/evflownet/evflownet.pth
-
-# Freeze the EVFlownet weights
-freeze_weights: False
+model: emmnet-angles
 
 # Set the type of IMU padding. Support values are "copy", "static". 
 # - copy simply fills unavailable states with a copy of the first available data. 
@@ -25,7 +19,7 @@ freeze_weights: False
 padding: static 
 
 # Length of the states sequence
-sequence_length: 5
+sequence_length: 1
 
 # Sampling interval along the trajectory. It determines how many state points are 
 # retrieved from that trajectory. 
@@ -35,21 +29,25 @@ sample_interval: 1
 # or "minmax".
 event_normalization: "null"
 
-# # Eventually reduce the event integration window w.r.t. the original input. This is valid 
-# # only when the dataset is set to "last_timestamp".
-# event_integration_window: 5e5
+# Eventually reduce the event integration window w.r.t. the original input. This is valid 
+# only when the dataset is set to "last_timestamp".
+event_integration_window: 3e5
 
 # Dropout fraction for the model
-dropout: 0.10
+dropout: 0.15
 
 # Type of output, either "initial_state", "final_state", "central_state" or "sequence".
 output_type: final_state
+
+channels_angle: [16, 32, 64]
+channels_omega: [16, 32, 64]
+channels_range: [8, 16, 32]
 
 # Training losses settings
 losses:
 
   # Weight for the loss using absolute MSE
-  lmb_mse_abs: 0.0 
+  lmb_mse_abs: 0.000
 
   # Weight for the loss using relative MSE
   lmb_mse_rel: 0.0 

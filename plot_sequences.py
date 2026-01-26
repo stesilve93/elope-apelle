@@ -10,7 +10,7 @@ from tabulate import tabulate
 from elope.datasets import SequenceLoader
 from elope.utils import LOGGER, load_yaml, gridminor, getfiles
 
-MODEL_PATH = Path("weights") / "elope-emmnet-v1-elope_20250722_070237"
+MODEL_PATH = Path("weights") / "emmnet-angles_20250803_152906-best"
 
 # Path to the yaml file containing the dataset settings
 DATASET_CFG = MODEL_PATH / "dataset-cfg.yml"
@@ -22,7 +22,7 @@ MODEL_CFG = MODEL_PATH / "model-cfg.yml"
 WEIGHTS_PATH = MODEL_PATH / "best.pth"
 
 # True/False dependign on whether you would like to save the plots
-SAVE_PLOTS = False
+SAVE_PLOTS = True
 
 # Path to the folder in which to store the plots
 PLOT_PATH = Path("plots") / "sequences"
@@ -55,8 +55,8 @@ for mode in modes:
         event_H=events_cfg["height"],
         event_W=events_cfg["width"],
         event_T=events_cfg["channels"], 
-        imu_seq_len=int(model_cfg["imu_sequence_length"]), 
-        imu_padding=model_cfg["imu_padding"]
+        imu_seq_len=1, 
+        imu_padding="static"
     )
    
     # Retrieve the type of event normalization 
@@ -73,13 +73,13 @@ for mode in modes:
         seq_loader.load_sequence(seq)
         targets, imu, rangemeter = [], [], []
         
-        times = seq_loader.timestamps_full
-        targets = np.array(seq_loader.trajectory_full[:, 0:6])
-        imu = np.array(seq_loader.trajectory_full[:, 6:12])
+        times = seq_loader.full_times
+        targets = np.array(seq_loader.full_states[:, 0:6])
+        imu = np.array(seq_loader.full_imu[:, 6:12])
         rangemeter = np.interp(
             times, 
-            seq_loader.rangemeter_full[:, 0], 
-            seq_loader.rangemeter_full[:, 1],
+            seq_loader.full_rangemeter[:, 0], 
+            seq_loader.full_rangemeter[:, 1],
         )
         
         # Store the simulation timestep

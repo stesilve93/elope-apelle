@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 from pathlib import Path
 
-from elope.utils import load_yaml, angles_to_dcm 
+from elope.utils import load_yaml
 
 class PhysicsConsistencyGate(nn.Module):
     """
@@ -1000,10 +1000,10 @@ class MultiModalVelocityEstimatorNoPool(nn.Module):
         
         model = MultiModalVelocityEstimatorNoPool(
             event_channels= 2 * int(event_channels), # Include both polarities
-            use_attention=True,
+            use_attention=bool(cfg["use_attention"]), 
             dropout=float(cfg["dropout"]),
-            use_physics_aware=False,
-            **kwargs
+            use_physics_aware=bool(cfg["physics_aware"], 
+            **kwargs)
         )
         
         return model.to(device)
@@ -1060,14 +1060,6 @@ class MultiModalVelocityEstimatorNoPool(nn.Module):
         else:             
             # Final prediction
             output = self.regressor(fused_feat)
-            
-        # Rotate the output from the camera to the inertial frame 
-        angles = imu_tensor[..., -1, 0:3]
-        dcm = angles_to_dcm(angles) # (B, 3, 3)
-        
-        # Output has shape (B, 3)
-        output = output.unsqueeze(-1)   # (B, 3, 1)
-        output = (dcm@output).squeeze() # (B, 3)
         
         return {
             'prediction': output,

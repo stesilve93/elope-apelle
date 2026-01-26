@@ -1,13 +1,14 @@
 
 import math
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from pathlib import Path
 
-from elope.utils import load_yaml, angles_to_dcm 
+from elope.utils import load_yaml, angles_to_dcm
 
 class PhysicsConsistencyGate(nn.Module):
     """
@@ -222,8 +223,8 @@ class PhysicsAwareIMUEncoder(nn.Module):
             x_modulated = layer(x_modulated, consistency_score)
         
         # Global pooling and output
-        #x_pooled = x_modulated.mean(dim=1)
-        output = self.output_proj(x_modulated)
+        x_pooled = x_modulated.mean(dim=1)
+        output = self.output_proj(x_pooled)
         
         return output, consistency_score, kin_loss
 
@@ -425,7 +426,7 @@ class EventEncoder(nn.Module):
     output_dim (int): The number of output dimensions. Defaults to 128.
     dropout (float): The dropout probability. Defaults to 0.15.
     """
-    def __init__(self, input_channels: int = 2, output_dim: int = 256, dropout: float = 0.15):
+    def __init__(self, input_channels: int = 2, output_dim: int = 128, dropout: float = 0.15):
         super().__init__()
         
         # Initial convolution with stochastic depth
@@ -445,12 +446,14 @@ class EventEncoder(nn.Module):
         self.layer4 = self._make_layer(256, 512, 2, stride=(1,2,2), dropout=dropout)
         
         # Global pooling and projection with regularization
-        self.avgpool = nn.AdaptiveAvgPool3d((None, 1, 1))
+        # The AdaptiveAvgPool3d is used to reduce the spatial and temporal
+        # dimensions to 1
+        self.avgpool = nn.AdaptiveAvgPool3d((1, 1, 1))
         # The output is flattened and passed through a fully connected layer
         # with a dropout layer to reduce overfitting
         self.fc = nn.Sequential(
             nn.Dropout(dropout * 2),
-            nn.Linear(512, output_dim), # 512 is the channel dimension before pooling
+            nn.Linear(512, output_dim),
             nn.LayerNorm(output_dim)  # Layer norm for better stability
         )
     
@@ -477,20 +480,7 @@ class EventEncoder(nn.Module):
         return nn.Sequential(*layers)
     
     def forward(self, x):
-        # Combine polarity and event_features into a single channel dimension
-        # This reshapes each (polarity, event_features, width, height) slice
-        # into (polarity * event_features, width, height) to use Conv3D properly
-        # (B, T, polarity * event_features, width, height)
-        x_reshaped = x.reshape(x.shape[0], x.shape[1], 
-                                x.shape[2] * x.shape[3], 
-                                x.shape[4], x.shape[5])
-
-        # Permute dimensions to (B, C_in, D_in, H_in, W_in) format
-        # (B, polarity * event_features, T, width, height)
-        x_conv3d = x_reshaped.permute(0, 2, 1, 3, 4) 
-
-        # Input shape: (B, C, T, H, W)
-        x = F.relu(self.bn1(self.conv1(x_conv3d)))
+        x = F.relu(self.bn1(self.conv1(x)))
         x = self.maxpool(x)
         
         x = self.layer1(x)
@@ -499,14 +489,7 @@ class EventEncoder(nn.Module):
         x = self.layer4(x)
         
         x = self.avgpool(x)
-        
-        # Remove the singleton spatial dimensions
-        x = x.squeeze(-1).squeeze(-1) # (B, 512, T_in)
-
-        # Transpose to (B, T_in, 512) for the linear layer
-        x = x.transpose(1, 2) # (B, T_in, 512)
-        
-        # Apply the fully connected layer to each timestamp's feature
+        x = torch.flatten(x, 1)
         x = self.fc(x)
         
         return x
@@ -524,7 +507,7 @@ class TransformerIMUEncoder(nn.Module):
     n_layers (int): The number of transformer layers (default: 2)
     dropout (float): The dropout probability (default: 0.1)
     """
-    def __init__(self, input_dim: int = 6, d_model: int = 64, output_dim: int = 64, 
+    def __init__(self, input_dim: int = 3, d_model: int = 64, output_dim: int = 32, 
                  n_heads: int = 4, n_layers: int = 2, dropout: float = 0.1):
         super().__init__()
         self.d_model = d_model
@@ -567,7 +550,7 @@ class TransformerIMUEncoder(nn.Module):
         x = self.transformer(x)
         
         # Global average pooling over time dimension
-        #x = x.mean(dim=1)  # (B, d_model)
+        x = x.mean(dim=1)  # (B, d_model)
         
         # Final projection
         x = self.output_proj(x)
@@ -577,7 +560,7 @@ class TransformerIMUEncoder(nn.Module):
 
 class GRURangemeterEncoder(nn.Module):
     """GRU-based rangemeter encoder with attention pooling"""
-    def __init__(self, input_dim: int = 1, hidden_dim: int = 64, 
+    def __init__(self, input_dim: int = 1, hidden_dim: int = 32, 
                  output_dim: int = 16, num_layers: int = 2, dropout: float = 0.1):
         """
         Initialize the GRU-based rangemeter encoder with attention pooling.
@@ -606,83 +589,28 @@ class GRURangemeterEncoder(nn.Module):
         )
         
         # Output projection with regularization
-        # Output projection now maps (hidden_dim*2 -> output_dim) for each timestep
         self.output_proj = nn.Sequential(
             nn.LayerNorm(hidden_dim * 2),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim * 2, output_dim)
         )
+    
     def forward(self, x):
         # Input shape: (B, T, 1)
         gru_out, _ = self.gru(x)  # (B, T, hidden_dim*2)
         
         # Attention-based pooling
-        #attention_weights = self.attention(gru_out)  # (B, T, 1)
-        #attention_weights = F.softmax(attention_weights, dim=1)
+        attention_weights = self.attention(gru_out)  # (B, T, 1)
+        attention_weights = F.softmax(attention_weights, dim=1)
         
         # Weighted sum
-        #attended = torch.sum(gru_out * attention_weights, dim=1)  # (B, hidden_dim*2)
+        attended = torch.sum(gru_out * attention_weights, dim=1)  # (B, hidden_dim*2)
         
         # Final projection
-        output = self.output_proj(gru_out)  # (B, T, output_dim)
+        output = self.output_proj(attended)
         
         return output
 
-class TemporalSequenceEncoder(nn.Module):
-    """
-    Encodes a sequence of timestamps into a fixed-size temporal embedding.
-    """
-    def __init__(self, input_dim: int = 1, hidden_dim: int = 32, output_dim: int = 64, num_layers: int = 1):
-        """
-        Initializes the TemporalSequenceEncoder.
-
-        Args:
-            input_dim (int): Dimension of a single timestamp (usually 1).
-            hidden_dim (int): Hidden dimension of the GRU.
-            output_dim (int): Desired output dimension of the temporal embedding.
-            num_layers (int): Number of GRU layers.
-        """
-        super().__init__()
-        # GRU to process the sequence of timestamps
-        self.gru = nn.GRU(
-            input_dim, hidden_dim, num_layers,
-            batch_first=True,
-            bidirectional=False # Unidirectional is usually sufficient for timestamps
-        )
-
-        # Linear layer to project the final hidden state to the desired output_dim
-        self.output_proj = nn.Sequential(
-            nn.LayerNorm(hidden_dim), # Normalize before final projection
-            nn.GELU(),
-            nn.Linear(hidden_dim, output_dim)
-        )
-
-    def forward(self, timestamps):
-        """
-        Encodes the timestamp sequence.
-
-        Args:
-            timestamps (torch.Tensor): Tensor of timestamps of shape (B, T).
-
-        Returns:
-            torch.Tensor: Temporal embedding of shape (B, output_dim).
-        """
-        # Ensure float type for GRU input
-        gru_input = timestamps.float()
-
-        # If timestamps are (B, T) (e.g., a simple sequence of scalar timestamps),
-        # we need to add a feature dimension (F=1) for the GRU.
-        if gru_input.dim() == 2:
-            gru_input = gru_input.unsqueeze(-1) # Transforms (B, T) to (B, T, 1)
-        
-        # Use full  'output' to preserve the sequence dimension
-        output_sequence, _ = self.gru(gru_input)
-
-        # Apply output_proj to each hidden state in the sequence.
-        # This transforms (B, T, hidden_dim) into (B, T, output_dim).
-        temporal_embedding = self.output_proj(output_sequence)
-
-        return temporal_embedding
 
 class CrossModalAttention(nn.Module):
     """
@@ -695,9 +623,8 @@ class CrossModalAttention(nn.Module):
     hidden_dim (int, optional): Hidden dimension of the attention mechanism and feed-forward network (default: 128)
     dropout (float, optional): Dropout probability for the attention mechanism and feed-forward network (default: 0.1)
     """
-    def __init__(self, event_dim: int, imu_dim: int, range_dim: int, 
-                 hidden_dim: int = 128, dropout: float = 0.1, use_physics_aware: bool = False,
-                 temporal_embedding_dim: int = 128):
+    def __init__(self, event_dim: int, imu_dim: int, angle_dim: int, range_dim: int, 
+                 hidden_dim: int = 128, dropout: float = 0.1, use_physics_aware: bool = False):
         super().__init__()
         
         # Feature projections with layer normalization
@@ -706,23 +633,22 @@ class CrossModalAttention(nn.Module):
             # Normalize the projected features
             nn.LayerNorm(hidden_dim)
         )
-        self.imu_proj = nn.Sequential(
+        self.w_proj = nn.Sequential(
             nn.Linear(imu_dim, hidden_dim),
             # Normalize the projected features
             nn.LayerNorm(hidden_dim)
         )
+        
+        self.angles_proj = nn.Sequential(
+            nn.Linear(angle_dim, hidden_dim), 
+            nn.LayerNorm(hidden_dim),
+        )
+        
         self.range_proj = nn.Sequential(
             nn.Linear(range_dim, hidden_dim),
             # Normalize the projected features
             nn.LayerNorm(hidden_dim)
         )
-
-        # No separate time_proj here; we directly use the learned temporal_embedding
-        # If temporal_embedding_dim != hidden_dim, you'd need a proj layer here:
-        if temporal_embedding_dim != hidden_dim:
-            self.temporal_embedding_adaptor = nn.Linear(temporal_embedding_dim, hidden_dim)
-        else:
-            self.temporal_embedding_adaptor = nn.Identity() # No adaptation needed
 
         self.use_physics_aware = use_physics_aware
         if self.use_physics_aware:
@@ -734,126 +660,71 @@ class CrossModalAttention(nn.Module):
                 nn.Softmax(dim=-1)
             )
 
-        # Multi-head attention (Cross-Attention: Query from Event, Key/Value from sequences)
-        # Or Multi-head attention (Self-Attention over combined sequences, with Event added)
-        # Let's go with a setup where Event can query other sequences.
-
-        # Cross-attention: Event (Query) attends to IMU/Range (Key/Value)
-        self.cross_attn_event_to_seq = nn.MultiheadAttention(
-            embed_dim=hidden_dim, 
-            num_heads=8, 
-            dropout=dropout, 
-            batch_first=True # Inputs will be (B, S, E)
+        # Multi-head attention with residual connections
+        self.attention = nn.MultiheadAttention(
+            hidden_dim, num_heads=8, dropout=dropout, batch_first=False
         )
         
-        # Self-attention for all combined modalities (Event, IMU, Range)
-        self.combined_self_attention = nn.MultiheadAttention(
-            embed_dim=hidden_dim, 
-            num_heads=8, 
-            dropout=dropout, 
-            batch_first=True
-        )
-
+        # Feed-forward network with residual connections
         self.ffn = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim * 2),
+            # GELU activation function
             nn.GELU(),
+            # Dropout regularization
             nn.Dropout(dropout),
             nn.Linear(hidden_dim * 2, hidden_dim)
         )
         
+        # Layer normalization for stabilizing the learning process
         self.norm1 = nn.LayerNorm(hidden_dim)
         self.norm2 = nn.LayerNorm(hidden_dim)
+        # Dropout regularization
         self.dropout = nn.Dropout(dropout)
 
-        # Final pooling after temporal and cross-modal fusion
-        self.final_attention_pooling = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.Tanh(),
-            nn.Linear(hidden_dim // 2, 1)
-        )
+        # Learnable weights for each modality
+        #self.modal_weights = nn.Parameter(torch.ones(3)) # Learnable weights for each modality
+
         
-    def forward(self, event_feat, imu_feat, range_feat, consistency_score, temporal_embedding):
-        # Input shapes as per your clarification:
-        # event_feat: (B, T, event_dim=128)
-        # imu_feat: (B, T, imu_dim=32)
-        # range_feat: (B, T, range_dim=16)
-        # temporal_embedding: (B, T, temporal_embedding_dim=128)
-        # consistency_score: (B, 1) (still global per batch)
+    def forward(self, event_feat, imu_feat, range_feat, angle_feat, consistency_score):
+        # Project features
+        e_proj = self.event_proj(event_feat)
+        i_proj = self.w_proj(imu_feat)
+        r_proj = self.range_proj(range_feat)
+        a_proj = self.angles_proj(angle_feat)
         
-        #print(f"Input shapes: event_feat={event_feat.shape}, imu_feat={imu_feat.shape}, range_feat={range_feat.shape}, temporal_embedding={temporal_embedding.shape}, consistency_score={consistency_score.shape}")
+        # Stack for attention (seq_len=3, batch, hidden_dim)
+        features = torch.stack([e_proj, i_proj, r_proj, a_proj], dim=0)
 
-        # Project features to common hidden_dim
-        e_proj = self.event_proj(event_feat)   # (B, T, hidden_dim)
-        i_proj = self.imu_proj(imu_feat)       # (B, T, hidden_dim)
-        r_proj = self.range_proj(range_feat)   # (B, T, hidden_dim)
-
-        # Adapt and add temporal embedding
-        # temporal_embedding is already (B, T, temporal_embedding_dim)
-        adapted_temporal_embedding = self.temporal_embedding_adaptor(temporal_embedding) # (B, T, hidden_dim)
-        
-        # Additive embedding to each modality's sequence at each timestamp
-        e_proj = e_proj + adapted_temporal_embedding
-        i_proj = i_proj + adapted_temporal_embedding
-        r_proj = r_proj + adapted_temporal_embedding
-
-        # Determine sequence length (T) - assuming all are consistent as per your input
-        B, T, D_h = e_proj.shape # D_h is hidden_dim
-
-        # 3. Apply physics-informed modality weighting (if enabled)
-        # Weights (B, 3) need to be broadcastable as (B, 1, 1) for each modality's (B, T, D_h) sequence
         if self.use_physics_aware:
-            modality_weights = self.modality_weighting(consistency_score) # (B, 3)
-            # Unbind to get (B,) tensors for each modality's weight
-            w_event, w_imu, w_range = modality_weights.unbind(dim=-1)
+            # Physics-informed modality weighting
+            modality_weights = self.modality_weighting(consistency_score)  # (B, 3)
+            modality_weights = modality_weights.transpose(0, 1).unsqueeze(-1)  # (3, B, 1)
             
-            # Apply weights using unsqueeze for broadcasting: (B, 1, 1)
-            e_proj = e_proj * w_event.unsqueeze(-1).unsqueeze(-1)
-            i_proj = i_proj * w_imu.unsqueeze(-1).unsqueeze(-1)
-            r_proj = r_proj * w_range.unsqueeze(-1).unsqueeze(-1)
-
-        # Concatenate all three sequences along the temporal dimension
-        # The result will be (B, 3 * T, hidden_dim)
-        combined_features = torch.cat([e_proj, i_proj, r_proj], dim=1)
+            # Apply physics-informed weighting
+            weighted_features = features * modality_weights
+            
+            # Self-attention
+            attended, attention_weights = self.attention(
+                weighted_features, weighted_features, weighted_features
+            )
+            attended = self.norm1(attended + weighted_features)
+        else:
+            # Self-attention with residual
+            attended, attention_weights = self.attention(features, features, features)
+            attended = self.norm1(attended + features)
         
-        # Create a padding mask (assuming no actual padding is needed if T is always 5 for all)
-        # If T *could* vary across modalities or batches, you'd need real padding here.
-        # For a fixed T=5 across all, the mask is all False.
-        combined_mask = torch.full((B, 3 * T), False, dtype=torch.bool, device=combined_features.device)
+        # Feed-forward with residual
+        ffn_out = self.ffn(attended)
+        ffn_out = self.norm2(ffn_out + attended)
         
-        #print(f"Combined features shape: {combined_features.shape}")
-
-        # 5. Apply unified Multi-head Self-Attention
-        # Query, Key, Value are all the combined sequence for self-attention
-        attended_combined, attention_weights_combined = self.combined_self_attention(
-            query=combined_features, 
-            key=combined_features, 
-            value=combined_features,
-            key_padding_mask=combined_mask # Pass the all-False mask
-        )
+        # Use learnable weights if available, otherwise simple average
+        if hasattr(self, 'modal_weights'):
+            weights = F.softmax(self.modal_weights, dim=0)  # (3,)
+            fused = torch.sum(ffn_out * weights.view(3, 1, 1), dim=0)  # Weighted sum
+        else:
+            fused = torch.mean(ffn_out, dim=0)  # Simple average fallback
         
-        # Residual connection and layer normalization
-        attended_combined = self.norm1(attended_combined + combined_features)
-        
-        # Feed-forward network (applied element-wise across the sequence)
-        ffn_out = self.ffn(attended_combined)
-        fused_sequence = self.norm2(ffn_out + attended_combined) # (B, 3 * T, hidden_dim)
-        
-        #print(f"Fused sequence shape after attention and FFN: {fused_sequence.shape}")
-
-        # 6. Final Pooling to get a single fused vector for the regressor
-        # Use attention pooling over the entire fused sequence
-        attention_scores = self.final_attention_pooling(fused_sequence).squeeze(-1) # (B, 3 * T)
-        
-        # Mask out padded values (though not strictly necessary if combined_mask is all False)
-        attention_scores.masked_fill_(combined_mask, float('-inf')) 
-        attention_weights_final = F.softmax(attention_scores, dim=-1) # (B, 3 * T)
-
-        # Weighted sum of features to produce the final (B, hidden_dim) output
-        fused = torch.sum(fused_sequence * attention_weights_final.unsqueeze(-1), dim=1) # (B, hidden_dim)
-        
-        #print(f"Final fused output shape: {fused.shape}")
-        
-        return fused, attention_weights_final
+        return fused, attention_weights
 
 
 class RegularizedRegressor(nn.Module):
@@ -913,17 +784,17 @@ class RegularizedRegressor(nn.Module):
         return out
 
 
-class MultiModalVelocityEstimatorNoPool(nn.Module):
+class MultiModalVelocityEstimatorAngles(nn.Module):
     """ Multi-modal network with better regularization"""
     def __init__(self, 
-                 event_channels: int = 6,
+                 event_channels: int = 2,
                  event_output_dim: int = 128,
                  imu_output_dim: int = 32,
                  range_output_dim: int = 16,
                  use_attention: bool = True,  # Default to True for better fusion
                  output_dim: int = 3,
                  dropout: float = 0.15,
-                 use_physics_aware: bool = True):
+                 use_physics_aware: bool = False):
         """
         Initialize the  MultiModalVelocityEstimator with regularization and attention.
 
@@ -946,31 +817,18 @@ class MultiModalVelocityEstimatorNoPool(nn.Module):
             self.imu_encoder = TransformerIMUEncoder(output_dim=imu_output_dim, dropout=dropout)
 
         self.range_encoder = GRURangemeterEncoder(output_dim=range_output_dim, dropout=dropout)
+        self.angle_encoder = TransformerIMUEncoder(output_dim=imu_output_dim, dropout=dropout)
         
         # Determine fusion strategy based on attention usage and physics awareness
         self.use_attention = use_attention
         self.use_physics_aware = use_physics_aware
 
-        # Define the temporal embedding dimension equal to
-        #  hidden_dim of the CrossModalAttention.
-        self.temporal_embedding_dim = 128 # Assuming CrossModalAttention hidden_dim
-
-        # Instantiate the new TemporalSequenceEncoder
-        self.temporal_encoder = TemporalSequenceEncoder(
-            input_dim=1, # Each timestamp is a single scalar
-            hidden_dim=self.temporal_embedding_dim // 2, # Smaller GRU hidden for embedding
-            output_dim=self.temporal_embedding_dim # Output dimension for additive fusion
-        )
-
         if use_attention:
             # Use cross-modal attention mechanism for feature fusion
             self.fusion = CrossModalAttention(
-                event_output_dim, imu_output_dim, range_output_dim, 
-                hidden_dim=self.temporal_embedding_dim,
-                dropout=dropout, use_physics_aware=self.use_physics_aware,
-                temporal_embedding_dim=self.temporal_embedding_dim
+                event_output_dim, imu_output_dim, imu_output_dim, range_output_dim, dropout=dropout, use_physics_aware=self.use_physics_aware
             )
-            fusion_input_dim = self.temporal_embedding_dim  # Hidden dimension for attention
+            fusion_input_dim = 128  # Hidden dimension for attention
         else:
             # Simple concatenation of feature dimensions
             fusion_input_dim = event_output_dim + imu_output_dim + range_output_dim
@@ -986,20 +844,14 @@ class MultiModalVelocityEstimatorNoPool(nn.Module):
         self._init_weights()
     
     @staticmethod 
-    def create_model(
-        cfg: str | Path | dict, 
-        event_channels: int, 
-        device: str="cpu", 
-        **kwargs
-    ):
+    def create_model(cfg: str | Path | dict, device: str="cpu", **kwargs):
         """Factory function to create the improved model"""
         
         # Retrieve the model configuration
         if isinstance(cfg, (str, Path)): 
             cfg = load_yaml(cfg)
         
-        model = MultiModalVelocityEstimatorNoPool(
-            event_channels= 2 * int(event_channels), # Include both polarities
+        model = MultiModalVelocityEstimatorAngles(
             use_attention=True,
             dropout=float(cfg["dropout"]),
             use_physics_aware=False,
@@ -1030,31 +882,34 @@ class MultiModalVelocityEstimatorNoPool(nn.Module):
         
         # Adjust times dimension
         times = times.unsqueeze(2)
+        
+        # Keep only the latest event 
+        event_tensor = event_tensor[:, -1]
+        
+        w_tensor = imu_tensor[..., 3:6]
+        angles = imu_tensor[..., 0:3]
 
         # Extract features
         event_feat = self.event_encoder(event_tensor)
         if self.use_physics_aware:
-            imu_feat, consistency_score, kin_loss = self.imu_encoder(imu_tensor, times)
+            imu_feat, consistency_score, kin_loss = self.imu_encoder(w_tensor, times)
         else:
-            imu_feat = self.imu_encoder(imu_tensor)
+            imu_feat = self.imu_encoder(w_tensor)
             consistency_score = 0 # Placeholder for consistency score if not using physics-aware
         range_feat = self.range_encoder(range_tensor)
         
-        # Encode the full timestamp sequence into a temporal embedding
-        temporal_embedding = self.temporal_encoder(times) # (B, temporal_embedding_dim)
-
+        angle_feat = self.angle_encoder(angles)
+        
         # Fusion
         if self.use_attention:
-            fused_feat, attention_weights = self.fusion(
-                event_feat, imu_feat, range_feat, 
-                consistency_score, temporal_embedding)
+            fused_feat, attention_weights = self.fusion(event_feat, imu_feat, range_feat, angle_feat, consistency_score)
         else:
             fused_feat = torch.cat([event_feat, imu_feat, range_feat], dim=1)
             attention_weights = None
         
         if self.use_physics_aware:
             # Apply kinematic constraint rectification
-            constrained_feat = self.kinematic_constraint(fused_feat, imu_tensor, times)
+            constrained_feat = self.kinematic_constraint(fused_feat, w_tensor, times)
             # Final prediction
             output = self.regressor(constrained_feat)
         else:             

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from elope.models.blocks import vAPE
 from elope.evflow import EVFlowNet
-from elope.utils import load_yaml
+from elope.utils import load_yaml, angles_to_dcm
 
 
 
@@ -441,6 +441,14 @@ class MultiModalVelocityEstimatorEVFlow(nn.Module):
 
         # Final prediction
         output = self.regressor(fused_feat)
+        
+        # Rotate the output from the camera to the inertial frame 
+        angles = imu_tensor[..., -1, 0:3]
+        dcm = angles_to_dcm(angles) # (B, 3, 3)
+        
+        # Output has shape (B, 3)
+        output = output.unsqueeze(-1)   # (B, 3, 1)
+        output = (dcm@output).squeeze() # (B, 3)
         
         return {
             'prediction': output,

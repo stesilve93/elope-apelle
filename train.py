@@ -2,6 +2,7 @@
 import datetime 
 import shutil
 
+import numpy as np
 import torch 
 
 from pathlib import Path 
@@ -12,21 +13,26 @@ from elope.trainers import LunarTrainer
 from elope.utils import LOGGER, load_yaml, increment_path
 
 # Path to the yaml file containing the dataset settings
-DATASET_CFG = "cfg/dataset/dataset-fix-01-last.yml"
+DATASET_CFG = "cfg/dataset/dataset-fix-03-last.yml"
 
 # Path to the yaml file containing the model settings
-MODEL_CFG = "cfg/training/emmnet-nopool.yml"
+MODEL_CFG = "cfg/training/emmnet-angles.yml"
+
+# Define the indexes of the files to be used for validation
+SEQUENCE_VAL = [4, 10, 11, 19]
 
 # Device configuration 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 LOGGER.info(f"Using device: {device}\n")
 
 # Split the sequences between train/val 
-all_sequences = [str(i).zfill(4) for i in range(28)]
-#seq_train = all_sequences[:20] + ['0023', '0027'] # 80% for training 
-#seq_val = all_sequences[20:23] + all_sequences[24:27]    # 20% for 
-seq_train = all_sequences[:22] # 80% for training 
-seq_val = all_sequences[22:]   # 20% for validation
+sequences = np.arange(0, 28, 1)
+
+seq_train = list(set(sequences) - set(SEQUENCE_VAL))
+seq_train.sort()
+
+seq_val = [f"{s:04d}" for s in SEQUENCE_VAL]
+seq_train = [f"{s:04d}" for s in seq_train]
 
 # Load the model and dataset config 
 model_cfg = load_yaml(MODEL_CFG)
@@ -101,7 +107,7 @@ shutil.copy(DATASET_CFG, SAVE_PATH / "dataset-cfg.yml")
 shutil.copy(MODEL_CFG, SAVE_PATH / "model-cfg.yml")
 
 # Train the model 
-trainer.train(num_epochs=100, max_patience=30, save_path=SAVE_PATH)
+trainer.train(num_epochs=300, max_patience=100, save_path=SAVE_PATH)
 trainer.plot_training(save_figure=True, path=SAVE_PATH, filename=f"training.png")
 
 LOGGER.info("Training completed!")

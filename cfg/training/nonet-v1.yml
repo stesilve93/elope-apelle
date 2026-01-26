@@ -5,13 +5,25 @@ weights:
   path: weights
 
   # Name of the model
-  name: emmnet-horizontal
+  name: nonet-v1
 
   # Specify every how many epochs the model weights should be saved.
   checkpoint_epochs: 10
 
 # Type of network model 
-model: emmnet-horizontal
+model: nonet-v1
+
+# Path to the PyTorch file containing the network weights
+evflownet_weights: weights/evflownet/evflownet.pth
+
+# Freeze the EVFlownet weights
+freeze_weights: True
+
+# Output dimensions of the feature vector for the flow encoder
+dim_flow: 128
+
+# Output dimensions for the range
+dim_range: [16, 32]
 
 # Set the type of IMU padding. Support values are "copy", "static". 
 # - copy simply fills unavailable states with a copy of the first available data. 
@@ -19,14 +31,14 @@ model: emmnet-horizontal
 padding: static 
 
 # Length of the states sequence
-sequence_length: 5
+sequence_length: 1
 
 # Sampling interval along the trajectory. It determines how many state points are 
 # retrieved from that trajectory. 
 sample_interval: 1
 
 # Make the network see the ground-truth during training
-pass_target: True 
+pass_target: False
 
 # Type of normalization for the event tensor. Supported values are "null", "standard", 
 # or "minmax".
@@ -34,7 +46,7 @@ event_normalization: "null"
 
 # Eventually reduce the event integration window w.r.t. the original input. This is valid 
 # only when the dataset is set to "last_timestamp".
-event_integration_window: 1e4
+event_integration_window: 5e5
 
 # Dropout fraction for the model
 dropout: 0.15
@@ -46,7 +58,7 @@ output_type: final_state
 losses:
 
   # Weight for the loss using absolute MSE
-  lmb_mse_abs: 0.0 
+  lmb_mse_abs: 0.0
 
   # Weight for the loss using relative MSE
   lmb_mse_rel: 0.0 
