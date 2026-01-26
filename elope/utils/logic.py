@@ -107,144 +107,101 @@ def angles_to_body_rates(angles: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
     return torch.stack([p, q, r], dim=-1)
     
     
-def angles_to_quat(angles: torch.Tensor) -> torch.Tensor: 
-    """Convert an XYZ sequence of angles to a quaternion.
+def angles_to_dcm(angles: torch.Tensor) -> torch.Tensor: 
+    """Compute the rotation matrix from camera to inertial frame. 
     
     Parameters
     ----------
+    angles : torch.Tensor: 
+        Roll, pitch and yaw rotation sequence (123), of shape (B, 3) or (B, T, 3). 
+    
+    Returns 
+    -------
+    dcm : torch.Tensor 
+        DCM matrices, of shape (B, 3, 3) or (B, T, 3, 3).
+    """
+    
+    assert angles.ndim <= 3
+    
+    # Retrieve the batch dimension
+    B = angles.shape[0]
+    
+    is_sequence = angles.ndim == 3
+    if is_sequence:
+        angles = angles.view(-1, 3)
+    
+    # Pre-compute all trigonometric terms
+    cos_phi = torch.cos(angles[..., 0])
+    sin_phi = torch.sin(angles[..., 0])
+    
+    cos_theta = torch.cos(angles[..., 1])
+    sin_theta = torch.sin(angles[..., 1])
+    
+    cos_psi = torch.cos(angles[..., 2])
+    sin_psi = torch.sin(angles[..., 2])
+    
+    # Initialize the tensor
+    dcm = torch.zeros(angles.shape[0], 9).to(angles)
+    
+    dcm[..., 0] = cos_phi*cos_psi
+    dcm[..., 1] = sin_phi*sin_theta*cos_psi - cos_phi*sin_psi
+    dcm[..., 2] = sin_phi*sin_psi + cos_phi*sin_theta*cos_psi
+    dcm[..., 3] = cos_theta*sin_psi 
+    dcm[..., 4] = cos_phi*cos_psi + sin_phi*sin_theta*sin_psi
+    dcm[..., 5] = cos_phi*sin_theta*sin_psi - sin_phi*cos_psi
+    dcm[..., 6] = -sin_theta
+    dcm[..., 7] = sin_phi*cos_theta
+    dcm[..., 8] = cos_phi*cos_theta
+    
+    # Transform into a 3x3 matrix
+    dcm = dcm.view(-1, 3, 3)
+    
+    if is_sequence:
+        # Recover the sequence length 
+        dcm = dcm.view(B, -1, 3, 3)
+    
+    return dcm 
+    
+    
+def rotate_velocity(velocity: torch.Tensor, angles: torch.Tensor) -> torch.Tensor: 
+    """Rotate the lander velocity from the camera to the inertial frame.
+    
+    Parameters
+    ----------
+    velocity : torch.Tensor 
+        Lander velocity in the camera frame, of shape (B, 3) or (B, T, 3).
     angles : torch.Tensor 
-        Euler angles, of shape (B, T, 3).
-    
-    Returns
-    -------
-    quat : torch.Tensor 
-        Quaternion, in scalar-last format, of shape (B, T, 4).
-    """
-    
-    # Retrieve the angles
-    phi, theta, psi = angles[..., 0], angles[..., 1], angles[..., 2]
-    
-    c1 = torch.cos(phi / 2)
-    s1 = torch.sin(phi / 2)
-    
-    c2 = torch.cos(theta / 2)
-    s2 = torch.sin(theta / 2)
-    
-    c3 = torch.cos(psi / 2)
-    s3 = torch.sin(psi / 2)
-    
-    # Compute the scalar component 
-    q0 = c1 * c2 * c3 - s1 * s2 * s3
-    
-    s = torch.ones_like(q0)
-    s[q0 < 0] = -1
-    
-    # Compute the vectorial part
-    q1 = s1 * c2 * c3 + c1 * s2 * s3
-    q2 = c1 * s2 * c3 - s1 * c2 * s3
-    q3 = c1 * c2 * s3 + s1 * s2 * c3
-    
-    # Ensure the quaternon is normalized
-    q = torch.stack([s*q1, s*q2, s*q3, s*q0], dim=-1)
-    return q / torch.norm(q, dim=-1).unsqueeze(2)
-    
-    
-def quat_multiply(qa: torch.Tensor, qb: torch.Tensor) -> torch.Tensor: 
-    """Compute the product between two quaternions.
-    
-    .. note:: 
-        All quaternions are assumed in scalar-last format. 
+        Roll, pitch and yaw rotation sequence (123), of shape (B, 3) or (B, T, 3).
         
-    Parameters
-    ----------
-    qa : torch.Tensor 
-        First quaternion, of shape (B, T, 4).
-    qb : torch.Tensor 
-        Second quaternion, of shape (B, T, 4).
-
-    Returns
-    -------
-    qc : torch.Tensor   
-        Output quaternion, of shape (B, T, 4).
-
-    """
-    qa1, qa2, qa3, qa4 = qa[..., 0], qa[..., 1], qa[..., 2], qa[..., 3]
-    qb1, qb2, qb3, qb4 = qb[..., 0], qb[..., 1], qb[..., 2], qb[..., 3]
-    
-    # Compute the quaternion components
-    q1 = qa4*qb1 + qa3*qb2 - qa2*qb3 + qa1*qb4 
-    q2 = qa4*qb2 - qa3*qb1 + qa1*qb3 + qa2*qb4
-    q3 = qa2*qb1 - qa1*qb2 + qa4*qb3 + qa3*qb4 
-    q4 = qa4*qb4 - qa1*qb1 - qa2*qb2 - qa3*qb3 
-    
-    return torch.stack([q1, q2, q3, q4], dim=-1)
-
-
-def quat_conj(q: torch.Tensor) -> torch.Tensor: 
-    """Compute the complex conjugate of a quaternion.
-    
-    Parameters
-    ----------
-    q : torch.Tensor
-        Input quaternion, of shape (B, T, 4), in scalar-last format..
-        
-    Returns
-    -------
-    qj : torch.Tensor
-        Quaternion conjugate, of shape (B, T, 4).
-    """
-    return torch.stack([-q[..., 0], -q[..., 1], -q[..., 2], q[..., 3]], dim=-1)
-    
-
-def quat_divide(qn: torch.Tensor, qd: torch.Tensor) -> torch.Tensor: 
-    """Compute the division between two quaternions.
-        
-    The convention adopted is such that given two elementary rotations `qn` and `qd`, 
-    with Direction Cosine Matrices (DCM) `N` and `D` respectively, the result of ``qn / qd``
-    equals ``N@D.T``.
-    
-    Parameters
-    ----------
-    qn, qd : torch.Tensor
-        Input quaternions of shape (B, T, 4), in scalar-last format.
-    
     Returns 
     -------
-    qout : torch.Tensor 
-        Division result, of shape (B, T, 4).
+    out : torch.Tensor
+        Lander velocity in the inertial frame, of shape (B, 3) or (B, T, 3)
     """
-    return quat_multiply(qn, quat_conj(qd))
     
+    assert velocity.shape[0] == angles.shape[0]
+    assert velocity.ndim == angles.ndim 
+    assert velocity.ndim <= 3 
+    
+    B = angles.shape[0]
+    is_sequence = angles.ndim == 3
+    if is_sequence: 
+        angles   = angles.view(-1, 3)       # (D, 3)
+        velocity = velocity.view(-1, 3)     # (D, 3)
+    
+    # Compute the rotation from camera to the inertial frame 
+    dcm = angles_to_dcm(angles)             # (D, 3, 3)
+        
+    velocity = velocity.unsqueeze(-1)       # (D, 3, 1)
+    velocity = (dcm@velocity).squeeze()     # (D, 3)
+    
+    if is_sequence: 
+        velocity = velocity.view(B, -1, 3)
+        
+    return velocity
 
-def quat_rotate(q: torch.Tensor, v: torch.Tensor) -> torch.Tensor: 
-    """Compute the passive rotation of a vector by a set of quaternions.
-    
-    Parameters
-    ----------
-    q : torch.Tensor 
-        Input quaternions, of shape (B, T, 4), in scalar-last format.
-    v : torch.Tensor
-        Input vector, of shape (3,).
-    
-    Returns 
-    -------
-    out : torch.Tensor 
-        Rotated vector, of shape (B, T, 3). 
-    
-    """
-    
-    # Transform the vector into a quaternion 
-    qv = torch.zeros_like(q)
-    qv[..., 0] = v[0]
-    qv[..., 1] = v[1]
-    qv[..., 2] = v[2]
-    
-    # Compute the quaternion result
-    qout = quat_multiply(q, quat_divide(qv, q))
-    return qout[..., :3]
-    
-    
-def estimate_zpos(ranges: torch.Tensor, angles: torch.Tensor) -> torch.Tensor: 
+
+def estimate_altitude(ranges: torch.Tensor, angles: torch.Tensor) -> torch.Tensor: 
     """Return an estimate of the vertical position from the range and attitude.
     
     Parameters
@@ -260,15 +217,92 @@ def estimate_zpos(ranges: torch.Tensor, angles: torch.Tensor) -> torch.Tensor:
         Vertical position component, of shape (B, T, 1). Negative by convention.
     """
     
-    # Transform the angles into quaternions 
-    q = angles_to_quat(angles)
+    # Retrieve the batch dimensions 
+    assert angles.shape[0] == ranges.shape[0]
+    assert angles.ndim == ranges.ndim 
+    assert angles.ndim <= 3 
     
-    # Define the vertical direction of the rangemeter in the body frame.
-    uz = torch.tensor([0.0, 0.0, 1.0]).to(q) 
+    B = angles.shape[0]
+    is_sequence = angles.ndim == 3 
+    if is_sequence: 
+        angles = angles.view(-1, 3)
+        ranges = ranges.view(-1, 1)
+        
+    # Ensure this is a scalar tensor
+    ranges = ranges.view(-1)
+
+    cos_theta = torch.cos(angles[..., 0])
+    cos_phi = torch.cos(angles[..., 1])
+    g = cos_phi * cos_theta     # (B,)
     
-    # Rotate the direction to the world-frame 
-    uw = quat_rotate(q, uz)
+    # Compute the altitude
+    altitude = (g * ranges).view(-1, 1) # (B, 1)
+
+    if is_sequence: 
+        altitude = altitude.view(B, -1, 1)
     
     # Retrieve the vertical position component 
-    return -torch.abs(ranges*uw[..., 2:3]) 
+    return altitude
     
+    
+def compute_point_depth(
+    coords: torch.Tensor, angles: torch.Tensor, altitude: torch.Tensor
+) -> torch.Tensor: 
+    """Compute the depth of a point given the lander attitude and altitude.
+    
+    Parameters
+    ----------
+    coords : torch.Tensor 
+        Normalized pixel coordinates, of shape (C, 2)
+    angles : torch.Tensor 
+        XYZ sequence of Euler angles, of shape (B, 3). 
+    altitude : torch.Tensor 
+        Spacecraft altitude, of shape (B,).
+    
+    Returns
+    -------
+    depth : torch.Tensor
+        Pixel depth, of shape (B, C)
+    """
+    
+    cos_phi = torch.cos(angles[..., 0])
+    sin_phi = torch.sin(angles[..., 0])
+
+    cos_theta = torch.cos(angles[..., 1])
+    sin_theta = torch.sin(angles[..., 1])
+    
+    a = (-sin_theta).unsqueeze(1)
+    b = ( sin_phi*cos_theta).unsqueeze(1) 
+    g = ( cos_phi*cos_theta).unsqueeze(1)
+    
+    # Retrieve the point coordinates
+    xs = coords[..., 0]
+    ys = coords[..., 1]
+    
+    # Compute the pixel depth
+    depth = altitude.unsqueeze(1)/(a*xs + b*ys + g)
+    return depth
+
+def generate_pixelgrid(height: int, width: int) -> torch.Tensor: 
+    """Return a normalized grid of pixel coordinates.
+    
+    Parameters
+    ----------
+    height : int 
+        Camera height. 
+    width : int 
+        Camera width 
+        
+    Returns
+    -------
+    coords : torch.Tensor
+        A Tensor of shape (H, W, 2) with the normalized pixel coords.
+    """
+    
+    xc = (torch.arange(width) + 0.5) * (2 / width) - 1
+    yc = (torch.arange(height) + 0.5) * (2 / height) - 1
+    
+    grid = torch.cartesian_prod(yc, xc).view(height, width, 2)
+    grid = grid.flip(2)
+    return grid
+

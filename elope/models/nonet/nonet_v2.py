@@ -238,13 +238,14 @@ class RegularizedRegressor(nn.Module):
         return out
 
 
-class NoFlowNet(nn.Module):
+class NoFlowNet2(nn.Module):
     
     def __init__(
         self, 
         sequence_len: int,
         dim_flow: int=128,
-        dim_range: int=[32],
+        dim_range: list=[32],
+        dim_angles: list=[32, 64, 64],
         dropout: float = 0.15,
     ):
 
@@ -266,10 +267,19 @@ class NoFlowNet(nn.Module):
             activation=nn.SiLU(),
             norm=True, 
             dropout=dropout
+        )        
+        
+        # Initialize the encoder for the angles 
+        self.angle_encoder = BaseEmbedding(
+            input_dim=3, 
+            hidden_dim=dim_angles, 
+            activation=nn.SiLU(),
+            norm=True, 
+            dropout=dropout
         )
         
         # Create the regressor for the velocity in the camera frame
-        dim_regressor = dim_flow + dim_range[-1]
+        dim_regressor = dim_flow + dim_range[-1] + dim_angles[-1]
         self.regressor = RegularizedRegressor(
             dim_regressor,
             output_dim=3,
@@ -287,7 +297,7 @@ class NoFlowNet(nn.Module):
         if isinstance(cfg, (str, Path)): 
             cfg = load_yaml(cfg)
         
-        model = NoFlowNet(
+        model = NoFlowNet2(
             dropout=float(cfg["dropout"]),
             sequence_len=int(cfg["sequence_length"]),
             dim_flow=int(cfg["dim_flow"]), 
@@ -332,6 +342,8 @@ class NoFlowNet(nn.Module):
         event_tensor = event_tensor[:, -1]  # (B, 2, C, H, W)
         range_tensor = range_tensor[:, -1]  # (B, 1)
         
+        angle_tensor = imu_tensor[:, -1, 0:3]
+        
         # Keep only the first angular velocity 
         w_tensor = imu_tensor[:, -1, 3:6]   # (B, 3)
 
@@ -344,25 +356,55 @@ class NoFlowNet(nn.Module):
         # Get the feature from the rangemeter 
         feats_range = self.range_encoder(range_tensor)        # (B, dim_range)
         
+        # Get the feature from the angles 
+        feats_angles = self.angle_encoder(angle_tensor)       # (B, dim_angle)
+        
         # Simple fusion between the two sets of features
         # TODO: this could be updated with an improved fusion strategy....
-        feats = torch.cat([feats_flow, feats_range], dim=-1)  # (B, dim_regressor)
+        feats = torch.cat([feats_flow, feats_range, feats_angles], dim=-1)  # (B, dim_regressor)
         
         # The regressor estimates the velocity in the camera axes. 
         out = self.regressor(feats)         # (B, 3)
         
-        # We then use the orientation angles to rotate it to the inertial frame 
-        # knowing the transformation matrix
-            
-        # Rotate the output from the camera to the inertial frame 
-        angles = imu_tensor[..., -1, 0:3]
-        dcm = angles_to_dcm(angles) # (B, 3, 3)
-        
-        # Output has shape (B, 3)
-        out = out.unsqueeze(-1)   # (B, 3, 1)
-        out = (dcm@out).squeeze() # (B, 3)
-
         return {
             'prediction': out,
             'optical_flow': dict_flow,
         }
+
+
+def rotate_velocity(velocity: torch.Tensor, angles: torch.Tensor) -> torch.Tensor: 
+    """Rotate the lander velocity from the camera to the inertial frame.
+    
+    Parameters
+    ----------
+    velocity : torch.Tensor 
+        Lander velocity in the camera frame, of shape (B, 3) or (B, T, 3).
+    angles : torch.Tensor 
+        Roll, pitch and yaw rotation sequence (123), of shape (B, 3) or (B, T, 3).
+        
+    Returns 
+    -------
+    out : torch.Tensor
+        Lander velocity in the inertial frame, of shape (B, 3) or (B, T, 3)
+    """
+    
+    assert velocity.shape[0] == angles.shape[0]
+    assert velocity.ndim == angles.ndim 
+    assert velocity.ndim <= 3 
+    
+    B = angles.shape[0]
+    is_sequence = angles.ndim == 3
+    if is_sequence: 
+        angles   = angles.view(-1, 3)       # (D, 3)
+        velocity = velocity.view(-1, 3)     # (D, 3)
+    
+    # Compute the rotation from camera to the inertial frame 
+    dcm = angles_to_dcm(angles)             # (D, 3, 3)
+        
+    velocity = velocity.unsqueeze(-1)       # (D, 3, 1)
+    velocity = (dcm@velocity).squeeze()     # (D, 3)
+    
+    if is_sequence: 
+        velocity = velocity.view(B, -1, 3)
+        
+    return velocity

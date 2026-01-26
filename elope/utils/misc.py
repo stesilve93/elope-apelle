@@ -75,6 +75,29 @@ def save_yaml(filepath: str | Path, data: dict):
         yaml.dump(data, f)
 
 
+def load_json(filename: str) -> dict: 
+    """Read the content of a .json file.
+    
+    Parameters
+    ----------
+    filename : str 
+        Path to the .json file. 
+        
+    Returns
+    -------
+    data : dict 
+        JSON file content.
+    """
+    
+    # Check the file suffix
+    check_suffix(filename, ".json")
+    
+    # Read the file content 
+    with open(filename, 'r') as f: 
+        data = json.load(f)
+        
+    return data 
+
 def increment_path(path: str | Path, exist_ok: bool=True, sep: str = '-') -> Path:
     # DOCME 
     
