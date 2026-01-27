@@ -17,6 +17,7 @@ dependencies:
   - tqdm
   - pyyaml
   - colorlog
+  - opencv
   - pytorch
   - torchvision
   - torchaudio

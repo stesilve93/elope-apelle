@@ -204,7 +204,7 @@ INTEGRATION_WINDOW = 1e4
 INTEGRATION_TIME = 1e6
 
 # True if we should concatenate also the results from evflownet
-USE_EVFLOW = True
+USE_EVFLOW = False
 
 # Get how many event tensors we need to stack
 STACK = int(INTEGRATION_TIME / INTEGRATION_WINDOW)
@@ -228,7 +228,7 @@ if USE_EVFLOW:
     model = model.to(device)
 
 sequences = [str(i).zfill(4) for i in range(28)]
-for SEQUENCE_ID in sequences[:1]: 
+for SEQUENCE_ID in sequences: 
         
     # Load the sequence data
     data = np.load(SEQUENCE_PATH / (SEQUENCE_ID + ".npz"))

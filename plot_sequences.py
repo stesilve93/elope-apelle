@@ -10,7 +10,7 @@ from tabulate import tabulate
 from elope.datasets import SequenceLoader
 from elope.utils import LOGGER, load_yaml, gridminor, getfiles
 
-MODEL_PATH = Path("weights") / "emmnet-angles_20250803_152906-best"
+MODEL_PATH = Path("weights") / "emmnet-angles_20260127_112013"
 
 # Path to the yaml file containing the dataset settings
 DATASET_CFG = MODEL_PATH / "dataset-cfg.yml"
@@ -75,7 +75,7 @@ for mode in modes:
         
         times = seq_loader.full_times
         targets = np.array(seq_loader.full_states[:, 0:6])
-        imu = np.array(seq_loader.full_imu[:, 6:12])
+        imu = np.array(seq_loader.full_imu[:, 0:6])
         rangemeter = np.interp(
             times, 
             seq_loader.full_rangemeter[:, 0], 
