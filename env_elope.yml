@@ -254,7 +254,6 @@ dependencies:
   - traitlets=5.7.1=py310h06a4308_0
   - typing=3.10.0.0=py310h06a4308_0
   - typing-extensions=4.9.0=py310h06a4308_1
-  - typing_extensions=4.12.2=py310h06a4308_0
   - tzdata=2024a=h04d1e81_0
   - urllib3=2.1.0=py310h06a4308_1
   - wandb=0.20.1=py310h505e2c1_0
@@ -302,7 +301,7 @@ dependencies:
       - jsonschema==4.22.0
       - jsonschema-specifications==2023.12.1
       - jupyterlab-widgets==3.0.13
-      - lightglue==0.0
+      - lightglue
       - markdown-it-py==3.0.0
       - mdurl==0.1.2
       - narwhals==1.25.0

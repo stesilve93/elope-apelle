@@ -21,7 +21,7 @@ from elope.utils import (
 
 
 # Path to the model configuration weights
-MODEL_PATH = Path("weights") / "emmnet-angles_20250803_152906-best"
+MODEL_PATH = Path("weights") / "emmnet-angles_20260127_112013"
 
 # Validation sequence (used only if cross-train is false)
 VAL_SEQUENCE = [4, 10, 11, 19]
@@ -72,7 +72,7 @@ else:
 SAVE_PLOTS = True
 
 # True if the output of the z-velocity should be taken from the geometry constraint
-OUTPUT_ANALYTICAL_VZ = False 
+OUTPUT_ANALYTICAL_VZ = True 
 
 # Device configuration 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

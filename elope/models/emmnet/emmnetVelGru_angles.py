@@ -220,7 +220,8 @@ class EventEncoder(nn.Module):
         x = self.layer4(x)
         
         x = self.avgpool(x)         # [B, 512, 1, 2, 2]
-        x = x.squeeze()             # [B, 512, 2, 2]      
+        # Only remove the temporal dimension; keep batch even when B=1.
+        x = x.squeeze(2)            # [B, 512, 2, 2]
         x = x.permute(0, 2, 3, 1)   # [B, 2, 2, 512] 
         
         x = self.fc(x)              # [B, 2, 2, H]
@@ -429,7 +430,7 @@ class MultiModalVelocityEstimatorAngles(nn.Module):
             dropout=dropout, 
         )
         
-        fusion_input_dim = 128  # Hidden dimension for attention
+        fusion_input_dim = 256  # Must match CrossModalAttention hidden_dim
 
         # Initialize regularized regressor for final prediction
         self.regressor = RegularizedRegressor(fusion_input_dim, output_dim, dropout)

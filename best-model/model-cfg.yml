@@ -39,6 +39,10 @@ dropout: 0.15
 # Type of output, either "initial_state", "final_state", "central_state" or "sequence".
 output_type: final_state
 
+channels_angle: [16, 32, 64]
+channels_omega: [16, 32, 64]
+channels_range: [8, 16, 32]
+
 # Training losses settings
 losses:
 
