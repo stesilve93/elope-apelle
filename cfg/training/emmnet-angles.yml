@@ -19,7 +19,7 @@ model: emmnet-angles
 padding: static 
 
 # Length of the states sequence
-sequence_length: 1
+sequence_length: 3
 
 # Sampling interval along the trajectory. It determines how many state points are 
 # retrieved from that trajectory. 
@@ -47,7 +47,7 @@ channels_range: [8, 16, 32]
 losses:
 
   # Weight for the loss using absolute MSE
-  lmb_mse_abs: 0.000
+  lmb_mse_abs: 0.0
 
   # Weight for the loss using relative MSE
   lmb_mse_rel: 0.0 

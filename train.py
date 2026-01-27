@@ -13,10 +13,10 @@ from elope.trainers import LunarTrainer
 from elope.utils import LOGGER, load_yaml, increment_path
 
 # Path to the yaml file containing the dataset settings
-DATASET_CFG = "best-model/dataset-cfg.yml"
+DATASET_CFG = "cfg/dataset/dataset-fix-03-last.yml"
 
 # Path to the yaml file containing the model settings
-MODEL_CFG = "best-model/model-cfg.yml"
+MODEL_CFG = "cfg/training/emmnet-angles.yml"
 
 # Define the indexes of the files to be used for validation
 SEQUENCE_VAL = [4, 10, 11, 19]

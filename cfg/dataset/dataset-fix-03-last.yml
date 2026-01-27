@@ -37,4 +37,4 @@ events:
   encoder_method: last_timestamp 
   
   # Duration of the window in which events are integrated, in microseconds
-  integration_window: 1e5
+  integration_window: 3e5

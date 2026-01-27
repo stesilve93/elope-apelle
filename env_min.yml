@@ -17,9 +17,10 @@ dependencies:
   - tqdm
   - pyyaml
   - colorlog
-  - opencv
   - pytorch
   - torchvision
   - torchaudio
   - pytorch-cuda=12.1
   - ipykernel
+  - pip:
+      - opencv-python-headless
