@@ -28,7 +28,8 @@ class LunarTrainer:
         train_loader: ElopeDataLoader, 
         val_loader: ElopeDataLoader=None, 
         device: str ='cuda',
-        val_metric: str="elope_score"
+        val_metric: str="elope_score",
+        latent_log: dict | None = None
     ):
         
         # Retrieve the model configuration
@@ -78,6 +79,133 @@ class LunarTrainer:
         self.train_losses = []
         self.val_losses = []
         self.best_val_loss = float('inf')
+
+        # Optional latent logging
+        self.latent_log = latent_log or {}
+        self.latent_log_enabled = bool(self.latent_log.get("enabled", False))
+        self.latent_log_split = str(self.latent_log.get("split", "val"))
+        self.latent_log_max_batches = int(self.latent_log.get("max_batches", 10))
+        self.latent_log_every_n_epochs = int(self.latent_log.get("every_n_epochs", 1))
+        self.latent_log_dir = self.latent_log.get("path", None)
+        self._latent_cache = {}
+        self._latent_buffers = None
+        self._fusion_hook_handle = None
+        if self.latent_log_enabled and hasattr(self.model, "fusion"):
+            self._fusion_hook_handle = self.model.fusion.register_forward_hook(
+                self._capture_fusion
+            )
+
+    def _capture_fusion(self, module, inputs, output):
+        # Cache fused features and attention weights from the fusion module.
+        if isinstance(output, (tuple, list)) and len(output) > 0:
+            fused = output[0]
+            self._latent_cache["fused"] = fused.detach()
+            if len(output) > 1 and torch.is_tensor(output[1]):
+                self._latent_cache["attention"] = output[1].detach()
+        input_shapes = []
+        event_tokens = None
+        total_tokens = None
+        if len(inputs) > 0 and torch.is_tensor(inputs[0]) and inputs[0].ndim >= 2:
+            event_tokens = int(inputs[0].shape[1])
+        if event_tokens is not None:
+            total_tokens = event_tokens + 3
+        for inp in inputs:
+            input_shapes.append(tuple(inp.shape) if torch.is_tensor(inp) else None)
+        self._latent_cache["input_shapes"] = input_shapes
+        self._latent_cache["event_tokens"] = event_tokens
+        self._latent_cache["total_tokens"] = total_tokens
+
+    def _select_targets_times(self, targets: torch.Tensor, times: torch.Tensor) -> tuple:
+        if self.output_type == "initial_state":
+            return targets[:, 0], times[:, 0]
+        if self.output_type == "final_state":
+            return targets[:, -1], times[:, -1]
+        if self.output_type == "central_state":
+            return targets[:, self.seq_len // 2], times[:, self.seq_len // 2]
+        return targets, times
+
+    def _init_latent_buffers(self):
+        self._latent_buffers = {
+            "fused": [],
+            "attention": [],
+            "pred": [],
+            "target_vel": [],
+            "target_pos": [],
+            "time": [],
+            "event_tokens": [],
+            "total_tokens": []
+        }
+
+    def _maybe_log_batch(self, outputs: dict, targets: torch.Tensor, times: torch.Tensor):
+        if not self.latent_log_enabled or self._latent_buffers is None:
+            return
+        if len(self._latent_buffers["fused"]) >= self.latent_log_max_batches:
+            return
+
+        fused = self._latent_cache.get("fused", None)
+        if fused is None:
+            return
+
+        attention = outputs.get("attention_weights", None)
+        if attention is None:
+            attention = self._latent_cache.get("attention", None)
+
+        targets_sel, times_sel = self._select_targets_times(targets, times)
+        target_pos = targets_sel[..., 0:3].detach().cpu()
+        target_vel = targets_sel[..., 3:6].detach().cpu()
+
+        self._latent_buffers["fused"].append(fused.detach().cpu())
+        if attention is not None and torch.is_tensor(attention):
+            self._latent_buffers["attention"].append(attention.detach().cpu())
+        self._latent_buffers["pred"].append(outputs["prediction"].detach().cpu())
+        self._latent_buffers["target_vel"].append(target_vel)
+        self._latent_buffers["target_pos"].append(target_pos)
+        self._latent_buffers["time"].append(times_sel.detach().cpu())
+        self._latent_buffers["event_tokens"].append(
+            torch.tensor(self._latent_cache.get("event_tokens", -1))
+        )
+        self._latent_buffers["total_tokens"].append(
+            torch.tensor(self._latent_cache.get("total_tokens", -1))
+        )
+
+    def _save_latent_buffers(self, epoch: int, split: str):
+        if not self.latent_log_enabled or self._latent_buffers is None:
+            return
+        if self.latent_log_dir is None:
+            return
+
+        out_dir = Path(self.latent_log_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"latents_{split}_epoch_{epoch:03d}.npz"
+
+        fused = torch.cat(self._latent_buffers["fused"], dim=0).numpy()
+        pred = torch.cat(self._latent_buffers["pred"], dim=0).numpy()
+        target_vel = torch.cat(self._latent_buffers["target_vel"], dim=0).numpy()
+        target_pos = torch.cat(self._latent_buffers["target_pos"], dim=0).numpy()
+        times = torch.cat(self._latent_buffers["time"], dim=0).numpy()
+
+        attention = None
+        if len(self._latent_buffers["attention"]) > 0:
+            first_attn = self._latent_buffers["attention"][0]
+            if first_attn.ndim == 2:
+                attention = torch.stack(self._latent_buffers["attention"], dim=0).numpy()
+            else:
+                attention = torch.cat(self._latent_buffers["attention"], dim=0).numpy()
+
+        event_tokens = torch.stack(self._latent_buffers["event_tokens"]).numpy()
+        total_tokens = torch.stack(self._latent_buffers["total_tokens"]).numpy()
+
+        np.savez_compressed(
+            out_path,
+            fused=fused,
+            pred=pred,
+            target_vel=target_vel,
+            target_pos=target_pos,
+            times=times,
+            attention=attention,
+            event_tokens=event_tokens,
+            total_tokens=total_tokens
+        )
         
     def weighted_pose_loss(self, predictions: torch.Tensor, targets: torch.Tensor) -> dict:
         """Compute weighted loss for position and velocity components."""
@@ -181,6 +309,14 @@ class LunarTrainer:
         running_mse_rel_loss = 0.0 
         
         num_batches = 0
+
+        do_latent_log = (
+            self.latent_log_enabled
+            and self.latent_log_split == "train"
+            and (epoch % self.latent_log_every_n_epochs == 0)
+        )
+        if do_latent_log:
+            self._init_latent_buffers()
         
         # Create the bar to display current iterations
         tbar = tqdm.tqdm(
@@ -201,6 +337,9 @@ class LunarTrainer:
             # Forward pass
             outputs = self.model(times, events, imu, rangemeter)
             predictions = outputs['prediction']
+
+            if do_latent_log:
+                self._maybe_log_batch(outputs, targets, times)
             
             # Compute loss
             loss_dict = self.weighted_pose_loss(predictions, targets)
@@ -225,7 +364,10 @@ class LunarTrainer:
             
             if i % tbar.miniters == 0:
                 tbar.set_postfix(avg_loss=f"{running_loss/num_batches:.6f}")
-            
+
+        if do_latent_log:
+            self._save_latent_buffers(epoch, "train")
+
         return {
             'total_loss': running_loss / num_batches,
             'elope_loss': running_elope_loss / num_batches,
@@ -233,7 +375,7 @@ class LunarTrainer:
             'vel_mse_rel_loss': running_mse_rel_loss / num_batches
         }
     
-    def validate(self) -> dict:
+    def validate(self, epoch: int | None = None) -> dict:
         """Validate the model."""
         
         if self.val_loader is None:
@@ -248,6 +390,15 @@ class LunarTrainer:
         
         all_predictions = []
         all_targets = []
+
+        do_latent_log = (
+            self.latent_log_enabled
+            and self.latent_log_split == "val"
+            and (epoch is not None)
+            and (epoch % self.latent_log_every_n_epochs == 0)
+        )
+        if do_latent_log:
+            self._init_latent_buffers()
         
         with torch.no_grad():
             
@@ -262,6 +413,9 @@ class LunarTrainer:
                 # Run inference
                 outputs = self.model(times, events, imu, rangemeter)
                 predictions = outputs['prediction']
+
+                if do_latent_log:
+                    self._maybe_log_batch(outputs, targets, times)
                 
                 # Compute the loss 
                 loss_dict = self.weighted_pose_loss(predictions, targets)
@@ -286,6 +440,9 @@ class LunarTrainer:
         # Stack all predictions and targets together
         all_predictions = torch.cat(all_predictions, dim=0)
         all_targets = torch.cat(all_targets, dim=0)
+
+        if do_latent_log:
+            self._save_latent_buffers(epoch, "val")
         
         # Compute the global prediction metric
         metrics = self.compute_metrics(all_predictions, all_targets, self.velocity_only)
@@ -337,7 +494,7 @@ class LunarTrainer:
             self.train_losses.append(train_metrics['total_loss'])
             
             # Validate
-            val_metrics = self.validate()
+            val_metrics = self.validate(epoch=epoch+1)
             if val_metrics:
                 self.val_losses.append(val_metrics['total_loss'])
                 val_loss = val_metrics[self.val_metric_key]

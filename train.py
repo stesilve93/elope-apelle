@@ -86,9 +86,6 @@ out_type = model_cfg["output_type"]
 model = build_model(model_cfg, dataset_cfg, device=device)
 LOGGER.info(f"Model type: {type(model)}")
 
-# Create the trainer for the model 
-trainer = LunarTrainer(MODEL_CFG, model, train_loader, val_loader, device)
-
 # Create the folder in which to store the model data 
 cfg_weights = model_cfg["weights"]
 
@@ -105,6 +102,20 @@ LOGGER.info(f"Saving training output to {SAVE_PATH} directory.")
 # Copy inside the folder the configuration yamls for the dataset and the model 
 shutil.copy(DATASET_CFG, SAVE_PATH / "dataset-cfg.yml")
 shutil.copy(MODEL_CFG, SAVE_PATH / "model-cfg.yml")
+
+# Configure latent logging for explainability analysis
+latent_log_cfg = {
+    "enabled": True,
+    "split": "val",
+    "max_batches": 10,
+    "every_n_epochs": 1,
+    "path": SAVE_PATH / "latents"
+}
+
+# Create the trainer for the model 
+trainer = LunarTrainer(
+    MODEL_CFG, model, train_loader, val_loader, device, latent_log=latent_log_cfg
+)
 
 # Train the model 
 trainer.train(num_epochs=300, max_patience=100, save_path=SAVE_PATH)
