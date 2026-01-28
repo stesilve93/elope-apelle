@@ -1,0 +1,61 @@
+
+weights: 
+
+  # Path to the folder in which to store the sample weights
+  path: weights
+
+  # Name of the model
+  name: emmnet-nopool
+
+  # Specify every how many epochs the model weights should be saved.
+  checkpoint_epochs: 10
+
+# Type of network model 
+model: emmnet-nopool
+
+# Set the type of IMU padding. Support values are "copy", "static". 
+# - copy simply fills unavailable states with a copy of the first available data. 
+# - static copies position/range/angles but sets velocity and angular velocity to zero.
+padding: static 
+
+# Length of the states sequence
+sequence_length: 1
+
+# Sampling interval along the trajectory. It determines how many state points are 
+# retrieved from that trajectory. 
+sample_interval: 1
+
+# Type of normalization for the event tensor. Supported values are "null", "standard", 
+# or "minmax".
+event_normalization: "null"
+
+# Eventually reduce the event integration window w.r.t. the original input. This is valid 
+# only when the dataset is set to "last_timestamp".
+event_integration_window: 1e5
+
+# True if the network should only provide the velocity as an input
+velocity_only: True
+
+# True if a physics-aware IMU encoder should be used
+physics_aware: False
+
+# True if attention should be used to determine the fusion strategy
+use_attention: True
+
+# Dropout fraction for the model
+dropout: 0.15
+
+# Type of output, either "initial_state", "final_state", "central_state" or "sequence".
+output_type: final_state
+
+# Training losses settings
+losses:
+
+  # Weight for the loss using absolute MSE
+  lmb_mse_abs: 0.0 
+
+  # Weight for the loss using relative MSE
+  lmb_mse_rel: 0.0 
+
+  # Weight for the ELOPE loss
+  lmb_elope: 1.0

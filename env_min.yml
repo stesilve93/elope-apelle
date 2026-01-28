@@ -1,0 +1,26 @@
+name: elope
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - numpy
+  - pandas
+  - scipy
+  - numba
+  - matplotlib
+  - seaborn
+  - tabulate
+  - tqdm
+  - pyyaml
+  - colorlog
+  - pytorch
+  - torchvision
+  - torchaudio
+  - pytorch-cuda=12.1
+  - ipykernel
+  - pip:
+      - opencv-python-headless

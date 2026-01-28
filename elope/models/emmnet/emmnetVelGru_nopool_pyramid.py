@@ -1,13 +1,14 @@
 
 import math
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from pathlib import Path
 
-from elope.utils import load_yaml, angles_to_dcm 
+from elope.utils import load_yaml
 
 class PhysicsConsistencyGate(nn.Module):
     """
@@ -493,10 +494,18 @@ class EventEncoder(nn.Module):
         x = F.relu(self.bn1(self.conv1(x_conv3d)))
         x = self.maxpool(x)
         
+        features = {}
         x = self.layer1(x)
+        features['layer1'] = self.avgpool(x).squeeze(-1).squeeze(-1).transpose(1, 2)
+
         x = self.layer2(x)
+        features['layer2'] = self.avgpool(x).squeeze(-1).squeeze(-1).transpose(1, 2)
+
         x = self.layer3(x)
+        features['layer3'] = self.avgpool(x).squeeze(-1).squeeze(-1).transpose(1, 2)
+
         x = self.layer4(x)
+        features['layer4'] = self.avgpool(x).squeeze(-1).squeeze(-1).transpose(1, 2) 
         
         x = self.avgpool(x)
         
@@ -508,8 +517,9 @@ class EventEncoder(nn.Module):
         
         # Apply the fully connected layer to each timestamp's feature
         x = self.fc(x)
-        
-        return x
+        features['final_layer'] = x  # (B, T_in, output_dim)
+
+        return features
 
 
 class TransformerIMUEncoder(nn.Module):
@@ -717,6 +727,19 @@ class CrossModalAttention(nn.Module):
             nn.LayerNorm(hidden_dim)
         )
 
+        self.event_layer_projs = nn.ModuleDict()
+        event_layer_dims = {
+            'layer1': 64,  # C after _temporal_global_pool_and_flatten for layer1
+            'layer2': 128, # C after _temporal_global_pool_and_flatten for layer2
+            'layer3': 256, # C after _temporal_global_pool_and_flatten for layer3
+            'layer4': 512  # C after _temporal_global_pool_and_flatten for layer4
+        }
+        for layer_name, dim in event_layer_dims.items():
+            self.event_layer_projs[layer_name] = nn.Sequential(
+                nn.Linear(dim, hidden_dim),
+                nn.LayerNorm(hidden_dim)
+            )
+
         # No separate time_proj here; we directly use the learned temporal_embedding
         # If temporal_embedding_dim != hidden_dim, you'd need a proj layer here:
         if temporal_embedding_dim != hidden_dim:
@@ -736,15 +759,6 @@ class CrossModalAttention(nn.Module):
 
         # Multi-head attention (Cross-Attention: Query from Event, Key/Value from sequences)
         # Or Multi-head attention (Self-Attention over combined sequences, with Event added)
-        # Let's go with a setup where Event can query other sequences.
-
-        # Cross-attention: Event (Query) attends to IMU/Range (Key/Value)
-        self.cross_attn_event_to_seq = nn.MultiheadAttention(
-            embed_dim=hidden_dim, 
-            num_heads=8, 
-            dropout=dropout, 
-            batch_first=True # Inputs will be (B, S, E)
-        )
         
         # Self-attention for all combined modalities (Event, IMU, Range)
         self.combined_self_attention = nn.MultiheadAttention(
@@ -781,9 +795,15 @@ class CrossModalAttention(nn.Module):
         # consistency_score: (B, 1) (still global per batch)
         
         #print(f"Input shapes: event_feat={event_feat.shape}, imu_feat={imu_feat.shape}, range_feat={range_feat.shape}, temporal_embedding={temporal_embedding.shape}, consistency_score={consistency_score.shape}")
-
+        event_layer_names_sorted = sorted(self.event_layer_projs.keys()) 
+        additional_e_projs = []
+        for layer_name in event_layer_names_sorted:
+            if layer_name in event_feat:
+                proj_module = self.event_layer_projs[layer_name]
+                additional_e_projs.append(proj_module(event_feat[layer_name]))
+            
         # Project features to common hidden_dim
-        e_proj = self.event_proj(event_feat)   # (B, T, hidden_dim)
+        e_proj = self.event_proj(event_feat['final_layer'])   # (B, T, hidden_dim)
         i_proj = self.imu_proj(imu_feat)       # (B, T, hidden_dim)
         r_proj = self.range_proj(range_feat)   # (B, T, hidden_dim)
 
@@ -795,6 +815,10 @@ class CrossModalAttention(nn.Module):
         e_proj = e_proj + adapted_temporal_embedding
         i_proj = i_proj + adapted_temporal_embedding
         r_proj = r_proj + adapted_temporal_embedding
+
+        for i in range(len(additional_e_projs)):
+            additional_e_projs[i] = additional_e_projs[i] + adapted_temporal_embedding
+
 
         # Determine sequence length (T) - assuming all are consistent as per your input
         B, T, D_h = e_proj.shape # D_h is hidden_dim
@@ -813,12 +837,14 @@ class CrossModalAttention(nn.Module):
 
         # Concatenate all three sequences along the temporal dimension
         # The result will be (B, 3 * T, hidden_dim)
-        combined_features = torch.cat([e_proj, i_proj, r_proj], dim=1)
+        all_features = [e_proj] + additional_e_projs + [i_proj, r_proj]
+
+        combined_features = torch.cat(all_features, dim=1)
         
         # Create a padding mask (assuming no actual padding is needed if T is always 5 for all)
         # If T *could* vary across modalities or batches, you'd need real padding here.
         # For a fixed T=5 across all, the mask is all False.
-        combined_mask = torch.full((B, 3 * T), False, dtype=torch.bool, device=combined_features.device)
+        combined_mask = torch.full((B, 7 * T), False, dtype=torch.bool, device=combined_features.device)
         
         #print(f"Combined features shape: {combined_features.shape}")
 
@@ -913,7 +939,7 @@ class RegularizedRegressor(nn.Module):
         return out
 
 
-class MultiModalVelocityEstimatorNoPool(nn.Module):
+class MultiModalVelocityEstimator(nn.Module):
     """ Multi-modal network with better regularization"""
     def __init__(self, 
                  event_channels: int = 6,
@@ -986,24 +1012,18 @@ class MultiModalVelocityEstimatorNoPool(nn.Module):
         self._init_weights()
     
     @staticmethod 
-    def create_model(
-        cfg: str | Path | dict, 
-        event_channels: int, 
-        device: str="cpu", 
-        **kwargs
-    ):
+    def create_model(cfg: str | Path | dict, device: str="cpu", **kwargs):
         """Factory function to create the improved model"""
         
         # Retrieve the model configuration
         if isinstance(cfg, (str, Path)): 
             cfg = load_yaml(cfg)
         
-        model = MultiModalVelocityEstimatorNoPool(
-            event_channels= 2 * int(event_channels), # Include both polarities
-            use_attention=True,
+        model = MultiModalVelocityEstimator(
+            use_attention=bool(cfg["use_attention"]), 
             dropout=float(cfg["dropout"]),
-            use_physics_aware=False,
-            **kwargs
+            use_physics_aware=bool(cfg["physics_aware"], 
+            **kwargs)
         )
         
         return model.to(device)
@@ -1060,14 +1080,6 @@ class MultiModalVelocityEstimatorNoPool(nn.Module):
         else:             
             # Final prediction
             output = self.regressor(fused_feat)
-            
-        # Rotate the output from the camera to the inertial frame 
-        angles = imu_tensor[..., -1, 0:3]
-        dcm = angles_to_dcm(angles) # (B, 3, 3)
-        
-        # Output has shape (B, 3)
-        output = output.unsqueeze(-1)   # (B, 3, 1)
-        output = (dcm@output).squeeze() # (B, 3)
         
         return {
             'prediction': output,

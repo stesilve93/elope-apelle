@@ -240,6 +240,17 @@ class EventProcessor:
             
             return np.vstack((ev_1, ev_2))
         
+        elif method == "evflownet": 
+            assert T == 2
+            
+            # Combine the event counts with only the latest timestamp 
+            img_count, img_stamp = _events_to_tensor_evflow(
+                events, time, H, W, time_window, side
+            )
+            
+            # Return a tensor of shape (T, H, W, 2)
+            return np.stack((img_count, img_stamp), axis=0).astype(np.float32)
+
         else: 
             raise ValueError(f"`{method}` is not a valid event encoding method.")
 
@@ -447,3 +458,45 @@ def _events_to_tensor_timestamp(
     
     # Stack the two channels 
     return np.stack((first_timestamp, last_timestamp), axis=0).astype(np.float32)
+
+@njit(cache=True)
+def _events_to_tensor_evflow(
+    events: np.ndarray, time: float, H: int, W: int, time_window: float, side: str
+) -> np.ndarray: 
+    
+    # events is of shape (N, 4), with (x, y, p, t) 
+
+    # Retrieve the initial time and re-order the event tensor to be increasing 
+    # in time (latest events = most recent, depending on the side)
+    if side == "left": 
+        t_beg = time - time_window 
+        events = events[np.argsort(events[:, -1])]
+    
+    else: 
+        t_beg = time 
+        events = events[np.argsort(-events[:, -1])]
+    
+    # Create the arrays with the events counts and last timestamps
+    img_count = np.zeros((H, W, 2))
+    img_stamp = np.zeros((H, W, 2))
+    
+    for e in events: 
+        
+        # Unfold the events coordinates 
+        xi, yi = e[:2].astype('int') 
+        
+        # Get the channel in which to store the time 
+        c = 0 if e[2] > 0 else 1 
+        
+        img_count[yi, xi, c] += 1 
+        img_stamp[yi, xi, c] = (e[-1] - t_beg)/time_window
+        
+    if side == "right": 
+        # Invert the timestamp tensor 
+        img_stamp = 1 - img_stamp 
+        
+        # Switch the polarities 
+        img_stamp = img_stamp[:, :, ::-1].copy()
+        img_count = img_count[:, :, ::-1].copy()
+    
+    return img_count, img_stamp

@@ -19,8 +19,16 @@ from elope.utils import (
     compute_posvelz
 )
 
-SUBMISSION_NAME = "elope-emmnet-v1_20250725_104838"
+# Name to give to the submissio
+SUBMISSION_NAME = "emmnet-angles_20260127_112013"
 
+# True if the model was obtained from a cross-training sample
+CROSS_TRAIN = False
+
+# Index of the cross-training group used for the submission
+CROSS_GROUP = 2
+
+# Path to the model configuration
 MODEL_PATH = Path("weights") / SUBMISSION_NAME
 
 # Path to the yaml file containing the dataset settings
@@ -30,7 +38,12 @@ DATASET_CFG = MODEL_PATH / "dataset-cfg.yml"
 MODEL_CFG = MODEL_PATH / "model-cfg.yml"
 
 # Path to PyTorch's weight file
-WEIGHTS_PATH = MODEL_PATH / "best.pth"
+if CROSS_TRAIN: 
+    WEIGHTS_PATH = MODEL_PATH / f"group-{CROSS_GROUP}" / "best.pth"
+    SUBMISSION_NAME = SUBMISSION_NAME + f"-g{CROSS_GROUP}"
+    
+else:  
+    WEIGHTS_PATH = MODEL_PATH / "best.pth"
 
 # Path in which the sequence data is stored
 DATAPATH = Path("elope_data") / "test"

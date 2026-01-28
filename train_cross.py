@@ -14,16 +14,16 @@ from elope.trainers import LunarTrainer
 from elope.utils import LOGGER, load_yaml, increment_path
 
 # Path to the yaml file containing the dataset settings
-DATASET_CFG = "cfg/dataset/dataset-last-1us.yml"
+DATASET_CFG = "cfg/dataset/dataset-fix-03-last.yml"
 
 # Path to the yaml file containing the model settings
-MODEL_CFG = "cfg/training/emmnet-v1.yml"
+MODEL_CFG = "cfg/training/emmnet-angles.yml"
 
 # Number of groups in which to split the validation dataset
 N_GROUPS = 7
 
 # Maximum number of training epochs
-MAX_EPOCHS = 2
+MAX_EPOCHS = 300
 
 # Maximum epoch patience per training
 MAX_EPOCHS_PATIENCE = 30
@@ -61,7 +61,7 @@ SAVE_PATH = increment_path(Path(cfg_weights["path"]) / SAVE_NAME, exist_ok=False
 SAVE_PATH.mkdir(parents=True)
 
 out_type = model_cfg["output_type"]
-model = build_model(model_cfg, dataset_cfg, device="device")
+model = build_model(model_cfg, dataset_cfg, device=device)
 LOGGER.info(f"Model type: {type(model)}")
 LOGGER.info(f"Saving cross-training output to {SAVE_PATH} directory.")
 
@@ -86,7 +86,15 @@ for k in range(N_GROUPS):
     sequence_length = int(model_cfg["sequence_length"])
     padding = str(model_cfg["padding"])
     event_norm = str(model_cfg["event_normalization"])
+    event_encoder = dataset_cfg["events"]["encoder_method"]
 
+    event_integration_window = model_cfg.get("event_integration_window", None)
+    if (event_integration_window != None and event_encoder != "last_timestamp"): 
+        LOGGER.warning(f"Cannot resize the window with encoder `{event_encoder}`. Resetting.")
+        event_integration_window = None
+    elif event_integration_window is not None:
+        event_integration_window = float(event_integration_window)
+    
     # Create the PyTorch's dataloaders
     train_loader = ElopeDataLoader(
         DATASET_CFG,
@@ -120,7 +128,7 @@ for k in range(N_GROUPS):
     )
 
     # Create the network model 
-    model = build_model(model_cfg, dataset_cfg, device="device")
+    model = build_model(model_cfg, dataset_cfg, device=device)
 
     # Create the trainer for the model 
     model_cfg["weights"]["checkpoint_epochs"] = MAX_EPOCHS + 1

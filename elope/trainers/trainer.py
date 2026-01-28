@@ -51,7 +51,7 @@ class LunarTrainer:
         
         # Store the name of the metric used to identify the best model 
         self.val_metric_key = val_metric
-        
+
         # Retrieve which state the model gives in output 
         self.output_type = self.cfg["output_type"]
         assert self.output_type in (
@@ -205,9 +205,7 @@ class LunarTrainer:
             # Compute loss
             loss_dict = self.weighted_pose_loss(predictions, targets)
             loss = loss_dict['total_loss']
-            # FIXME: Add kinematic loss to the standard structure if useful!! It seems not really effective :(
-            #loss = loss_dict['total_loss'] + outputs['kin_loss'] if 'kin_loss' in outputs else 0
-
+            
             # Backward pass
             # with torch.autograd.detect_anomaly():
             loss.backward()
@@ -383,7 +381,9 @@ class LunarTrainer:
             print("\n")
 
             if patience_counter >= max_patience:
-                LOGGER.warning("Early stopping triggered. No improvement for 10 epochs.")
+                LOGGER.warning(
+                    "Early stopping triggered. No improvement for {max_patience} epochs."
+                )
                 break
 
     def plot_training(

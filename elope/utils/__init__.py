@@ -7,6 +7,7 @@ from .cheats import (
 from .misc import (
     load_pickle,
     load_yaml, 
+    load_json,
     save_pickle,
     save_yaml, 
     increment_path, 
@@ -15,5 +16,7 @@ from .misc import (
 )
 
 from .logger import LOGGER
+
+from .logic import *
 
 from .plots import gridminor

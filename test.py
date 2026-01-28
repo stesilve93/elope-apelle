@@ -19,7 +19,24 @@ from elope.utils import (
     compute_posvelz,
 )
 
-MODEL_PATH = Path("weights") / "elope-emmnet-v1_20250725_104838"
+
+# Path to the model configuration weights
+MODEL_PATH = Path("weights") / "emmnet-angles_20260127_112013"
+
+# Validation sequence (used only if cross-train is false)
+VAL_SEQUENCE = [4, 10, 11, 19]
+
+# True if the model was obtained from a cross-training sample
+CROSS_TRAIN = False 
+
+# Index of the cross-training group used for the submission
+CROSS_GROUP = 2
+
+# Random generator seed used during cross-training
+CROSS_SEED = 0
+
+# Number of groups in which to split the validation set
+CROSS_NUM_GROUPS = 7
 
 # Path to the yaml file containing the dataset settings
 DATASET_CFG = MODEL_PATH / "dataset-cfg.yml"
@@ -27,25 +44,39 @@ DATASET_CFG = MODEL_PATH / "dataset-cfg.yml"
 # Path to the yaml file containing the model settings
 MODEL_CFG = MODEL_PATH / "model-cfg.yml"
 
-# Path to PyTorch's weight file
-WEIGHTS_PATH = MODEL_PATH / "best.pth"
+if CROSS_TRAIN: 
+    
+    # Path to PyTorch's weights file
+    WEIGHTS_PATH = MODEL_PATH / f"group-{CROSS_GROUP}" / "best.pth"
+    
+    RNG = np.random.default_rng(seed=CROSS_SEED)
+    sequences = np.arange(0, 28, 1)
+    RNG.shuffle(sequences)
+    
+    # Genearate the different groups
+    groups = np.array_split(sequences, CROSS_NUM_GROUPS)
+    groups = [[f"{s:04d}" for s in g] for g in groups]
+    
+    # Retrieve the sequence used as a validation test
+    seq_val = groups[CROSS_GROUP]
+
+else: 
+    
+    # Path to PyTorch's weights file
+    WEIGHTS_PATH = MODEL_PATH / "best.pth"
+
+    # Set the validation sequence
+    seq_val = [f"{s:04d}" for s in VAL_SEQUENCE]
 
 # True if the plots of the predictions / groundtruth should be saved for each test traj.
 SAVE_PLOTS = True
 
 # True if the output of the z-velocity should be taken from the geometry constraint
-OUTPUT_ANALYTICAL_VZ = False 
+OUTPUT_ANALYTICAL_VZ = True 
 
 # Device configuration 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 LOGGER.info(f"Using device: {device}\n")
-
-# Split the sequences between train/val 
-all_sequences = [str(i).zfill(4) for i in range(28)]
-# seq_train = all_sequences[:20] + ['0023', '0027'] # 80% for training 
-# seq_val = all_sequences[20:23] + all_sequences[24:27]    # 20% for validation
-seq_train = all_sequences[:22] # 80% for training 
-seq_val = all_sequences[22:]   # 20% for validation
 
 # Load the model config and dataset configs
 model_cfg = load_yaml(MODEL_CFG)
