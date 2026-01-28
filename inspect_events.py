@@ -204,7 +204,7 @@ INTEGRATION_WINDOW = 1e4
 INTEGRATION_TIME = 1e6
 
 # True if we should concatenate also the results from evflownet
-USE_EVFLOW = False
+USE_EVFLOW = True
 
 # Get how many event tensors we need to stack
 STACK = int(INTEGRATION_TIME / INTEGRATION_WINDOW)
