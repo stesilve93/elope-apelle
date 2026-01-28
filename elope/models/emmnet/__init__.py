@@ -6,3 +6,4 @@ from .emmnetVelGru_nopool import MultiModalVelocityEstimatorNoPool
 from .emmnetVelGruTransformer import MultiModalVelocityEstimatorTransformer
 from .emmnetVelGru_evflow import MultiModalVelocityEstimatorEVFlow
 from .emmnetVelGru_angles import MultiModalVelocityEstimatorAngles
+from .emmnetVelGru_angles_of import MultiModalVelocityEstimatorAnglesOF

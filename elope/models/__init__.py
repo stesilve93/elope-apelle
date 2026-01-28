@@ -56,6 +56,9 @@ def build_model(
         
         elif model == "emmnet-angles": 
             return MultiModalVelocityEstimatorAngles.create_model(cfg_model, device)
+        
+        elif model == "emmnet-angles-of": 
+            return MultiModalVelocityEstimatorAnglesOF.create_model(cfg_model, device)
 
         else: 
             raise ValueError(f"Unsupported emmnet model: {model}")

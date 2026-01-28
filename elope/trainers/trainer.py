@@ -6,6 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import torch
+import torch.nn.functional as F
 import tqdm 
 
 from pathlib import Path 
@@ -16,6 +17,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from elope.datasets import ElopeDataLoader
 from elope.utils import LOGGER, load_yaml
+from elope.models.emmnet.emmnetOf import EventWarper
 
 from .losses import loss_elope, loss_mse_abs, loss_mse_rel
 
@@ -69,6 +71,12 @@ class LunarTrainer:
         self.lmb_mse_abs = cfg_losses["lmb_mse_abs"] 
         self.lmb_mse_rel = cfg_losses["lmb_mse_rel"] 
         self.lmb_elope   = cfg_losses["lmb_elope"] 
+
+        # Optional self-supervised event-flow loss
+        self.aux_flow_weight = float(self.cfg.get("aux_flow_weight", 0.0))
+        self.aux_flow_smooth_weight = float(self.cfg.get("aux_flow_smooth_weight", 0.1))
+        self.aux_flow_enabled = self.aux_flow_weight > 0.0
+        self.event_warper = EventWarper().to(self.device) if self.aux_flow_enabled else None
         
         self.optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
         self.scheduler = ReduceLROnPlateau(
@@ -253,6 +261,32 @@ class LunarTrainer:
         }
         
         return loss
+
+    @staticmethod
+    def _flow_smoothness_loss(flow: torch.Tensor) -> torch.Tensor:
+        grad_u_x = torch.abs(flow[:, 0, :, 1:] - flow[:, 0, :, :-1])
+        grad_u_y = torch.abs(flow[:, 0, 1:, :] - flow[:, 0, :-1, :])
+        grad_v_x = torch.abs(flow[:, 1, :, 1:] - flow[:, 1, :, :-1])
+        grad_v_y = torch.abs(flow[:, 1, 1:, :] - flow[:, 1, :-1, :])
+        return grad_u_x.mean() + grad_u_y.mean() + grad_v_x.mean() + grad_v_y.mean()
+
+    def _compute_flow_aux_loss(
+        self, events: torch.Tensor, flow_pred: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        # events shape: (B, T, 2, C, H, W)
+        if events.size(1) < 2:
+            return torch.tensor(0.0, device=events.device), torch.tensor(0.0, device=events.device)
+
+        events_t0 = events[:, -2]
+        events_t1 = events[:, -1]
+        B, P, C, H, W = events_t0.shape
+        events_t0 = events_t0.reshape(B, P * C, H, W)
+        events_t1 = events_t1.reshape(B, P * C, H, W)
+
+        warped = self.event_warper(events_t0, flow_pred)
+        photo_loss = F.l1_loss(warped, events_t1, reduction='mean')
+        smooth_loss = self._flow_smoothness_loss(flow_pred)
+        return photo_loss, smooth_loss
         
     @staticmethod
     def compute_metrics(
@@ -307,6 +341,8 @@ class LunarTrainer:
         running_elope_loss = 0.0 
         running_mse_abs_loss = 0.0 
         running_mse_rel_loss = 0.0 
+        running_flow_photo = 0.0
+        running_flow_smooth = 0.0
         
         num_batches = 0
 
@@ -344,7 +380,17 @@ class LunarTrainer:
             # Compute loss
             loss_dict = self.weighted_pose_loss(predictions, targets)
             loss = loss_dict['total_loss']
-            
+
+            if self.aux_flow_enabled and outputs.get("flow_prediction") is not None:
+                flow_pred = outputs["flow_prediction"]
+                if flow_pred is not None:
+                    photo_loss, smooth_loss = self._compute_flow_aux_loss(events, flow_pred)
+                    loss = loss + self.aux_flow_weight * (
+                        photo_loss + self.aux_flow_smooth_weight * smooth_loss
+                    )
+                    loss_dict["flow_photo_loss"] = photo_loss
+                    loss_dict["flow_smooth_loss"] = smooth_loss
+
             # Backward pass
             # with torch.autograd.detect_anomaly():
             loss.backward()
@@ -359,6 +405,9 @@ class LunarTrainer:
             running_elope_loss += loss_dict['elope_loss'].item()
             running_mse_abs_loss += loss_dict['vel_mse_abs_loss'].item()
             running_mse_rel_loss += loss_dict['vel_mse_rel_loss'].item()
+            if "flow_photo_loss" in loss_dict:
+                running_flow_photo += loss_dict["flow_photo_loss"].item()
+                running_flow_smooth += loss_dict["flow_smooth_loss"].item()
             
             num_batches += 1
             
@@ -372,7 +421,9 @@ class LunarTrainer:
             'total_loss': running_loss / num_batches,
             'elope_loss': running_elope_loss / num_batches,
             'vel_mse_abs_loss': running_mse_abs_loss / num_batches,
-            'vel_mse_rel_loss': running_mse_rel_loss / num_batches
+            'vel_mse_rel_loss': running_mse_rel_loss / num_batches,
+            'flow_photo_loss': (running_flow_photo / num_batches) if self.aux_flow_enabled else 0.0,
+            'flow_smooth_loss': (running_flow_smooth / num_batches) if self.aux_flow_enabled else 0.0
         }
     
     def validate(self, epoch: int | None = None) -> dict:
@@ -387,6 +438,8 @@ class LunarTrainer:
         running_elope_loss = 0.0 
         running_mse_abs_loss = 0.0 
         running_mse_rel_loss = 0.0
+        running_flow_photo = 0.0
+        running_flow_smooth = 0.0
         
         all_predictions = []
         all_targets = []
@@ -425,6 +478,13 @@ class LunarTrainer:
                 running_elope_loss   += loss_dict['elope_loss'].item()
                 running_mse_abs_loss += loss_dict['vel_mse_abs_loss'].item()
                 running_mse_rel_loss += loss_dict['vel_mse_rel_loss'].item()
+
+                if self.aux_flow_enabled and outputs.get("flow_prediction") is not None:
+                    flow_pred = outputs["flow_prediction"]
+                    if flow_pred is not None:
+                        photo_loss, smooth_loss = self._compute_flow_aux_loss(events, flow_pred)
+                        running_flow_photo += photo_loss.item()
+                        running_flow_smooth += smooth_loss.item()
                 
                 # Check which output we need to retrieve 
                 if self.output_type == "initial_state":
@@ -452,6 +512,9 @@ class LunarTrainer:
         metrics['elope_loss'] = running_elope_loss / len(self.val_loader)
         metrics['vel_mse_abs_loss'] = running_mse_abs_loss / len(self.val_loader)
         metrics['vel_mse_rel_loss'] = running_mse_rel_loss / len(self.val_loader)
+        if self.aux_flow_enabled:
+            metrics['flow_photo_loss'] = running_flow_photo / len(self.val_loader)
+            metrics['flow_smooth_loss'] = running_flow_smooth / len(self.val_loader)
         return metrics
     
     def train(self, num_epochs: int, max_patience: int=10, save_path: str=None, **kwargs):
