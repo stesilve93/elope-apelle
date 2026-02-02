@@ -94,7 +94,7 @@ def frames_to_gif(
 
 
 # Model run name
-MODEL_NAME = "emmnet-angles_20260128_194925"
+MODEL_NAME = "emmnet-angles-of_20260202_151421"
 
 # Sequence dataset to visualize
 DATAPATH = Path("elope_data") / "train"

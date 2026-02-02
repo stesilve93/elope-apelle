@@ -21,7 +21,7 @@ from elope.utils import (
 
 
 # Path to the model configuration weights
-MODEL_PATH = Path("weights") / "emmnet-angles_20260128_194925"
+MODEL_PATH = Path("weights") / "emmnet-angles-of_20260202_151421"
 
 # Validation sequence (used only if cross-train is false)
 VAL_SEQUENCE = [4, 10, 11, 19]

@@ -16,7 +16,7 @@ from elope.utils import LOGGER, load_yaml, increment_path
 DATASET_CFG = "cfg/dataset/dataset-fix-03-last.yml"
 
 # Path to the yaml file containing the model settings
-MODEL_CFG = "cfg/training/emmnet-angles.yml"
+MODEL_CFG = "cfg/training/emmnet-angles-of.yml"
 
 # Define the indexes of the files to be used for validation
 SEQUENCE_VAL = [4, 10, 11, 19]

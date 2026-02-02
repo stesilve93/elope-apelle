@@ -20,7 +20,7 @@ from elope.utils import (
 )
 
 # Name to give to the submissio
-SUBMISSION_NAME = "emmnet-angles_20260128_194925"
+SUBMISSION_NAME = "emmnet-angles-of_20260202_151421"
 
 # True if the model was obtained from a cross-training sample
 CROSS_TRAIN = False
