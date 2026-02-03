@@ -49,8 +49,8 @@ flow_aux: true
 flow_height: 200
 flow_width: 200
 flow_from_events: true
-aux_flow_weight: 1.1
-aux_flow_smooth_weight: 0.1
+aux_flow_weight: 1.1 # Weight for the auxiliary flow loss
+aux_flow_smooth_weight: 0.1 # Weight for the auxiliary flow smoothness loss
 
 # Training losses settings
 losses:

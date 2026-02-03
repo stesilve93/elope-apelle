@@ -8,6 +8,7 @@ from PIL import Image
 
 from elope.datasets import EventProcessor, VariableSequenceLoader, FixedSequenceLoader
 from elope.models import build_model
+from elope.evflow import EVFlowNet
 from elope.utils import LOGGER, getfiles, load_yaml, increment_path
 
 
@@ -32,6 +33,28 @@ def flow_to_rgb(flow: np.ndarray) -> Image.Image:
     img_hsv = np.stack((hue, saturation, value), axis=-1)
     img_rgb = cv2.cvtColor(img_hsv, cv2.COLOR_HSV2RGB)
     return Image.fromarray(img_rgb)
+
+
+def overlay_flow_arrows(
+    base_img: Image.Image,
+    flow: np.ndarray,
+    step: int = 12,
+    scale: float = 1.0,
+    color: tuple[int, int, int] = (255, 255, 255),
+    thickness: int = 1
+) -> Image.Image:
+    """Overlay sparse flow vectors as arrows on an RGB image."""
+    img = np.array(base_img)
+    h, w = img.shape[:2]
+    for y in range(0, h, step):
+        for x in range(0, w, step):
+            u, v = flow[y, x]
+            x2 = int(round(x + u * scale))
+            y2 = int(round(y + v * scale))
+            if x2 == x and y2 == y:
+                continue
+            cv2.arrowedLine(img, (x, y), (x2, y2), color, thickness, tipLength=0.3)
+    return Image.fromarray(img)
 
 
 def events_to_image(
@@ -93,8 +116,58 @@ def frames_to_gif(
     )
 
 
+def build_evflownet_tensor(
+    full_events,
+    time_s: float,
+    integration_window_us: float,
+    height: int,
+    width: int,
+    side: str = "left",
+) -> np.ndarray:
+    """Return event tensor shaped (2, 2, H, W) for EVFlowNet input."""
+    if side == "left":
+        t_end = 1e6 * time_s
+        t_beg = t_end - integration_window_us
+    else:
+        t_beg = 1e6 * time_s
+        t_end = t_beg + integration_window_us
+
+    mask = (full_events["t"] >= t_beg) & (full_events["t"] <= t_end)
+    events = full_events[mask].copy()
+
+    if events.dtype == [("x", "<i2"), ("y", "<i2"), ("p", "?"), ("t", "<i8")]:
+        events_array = np.column_stack(
+            [events["x"], events["y"], events["p"].astype(int), events["t"]]
+        )
+    else:
+        if events.ndim == 1:
+            events_array = np.array(
+                [[e[0], e[1], int(e[2]), e[3]] for e in events], dtype=np.float32
+            )
+        else:
+            events_array = events
+
+    if events_array.shape[0] == 0:
+        return np.zeros((2, 2, height, width), dtype=np.float32)
+
+    tensor = EventProcessor.events_to_tensor(
+        events_array,
+        1e6 * time_s,
+        height,
+        width,
+        2,
+        method="evflownet",
+        time_window=integration_window_us,
+        side=side,
+        clamp=-1,
+    )
+    # (T, H, W, 2) -> (2, T, H, W)
+    tensor = np.transpose(tensor, (3, 0, 1, 2)).astype(np.float32)
+    return tensor
+
+
 # Model run name
-MODEL_NAME = "emmnet-angles-of_20260202_151421"
+MODEL_NAME = "emmnet-angles-of_20260203_135413"
 
 # Sequence dataset to visualize
 DATAPATH = Path("elope_data") / "train"
@@ -105,9 +178,14 @@ SAVE_ROOT = Path("sequence_flow_preds")
 # Frames per sequence and stride
 MAX_FRAMES = 200
 FRAME_STRIDE = 1
+ARROW_STEP = 12
+ARROW_SCALE = 1.5
+ARROW_THICKNESS = 1
 
 # GIF settings
 GIF_DURATION = 3
+USE_EVFLOWNET = True
+EVFLOWNET_WEIGHTS = Path("weights") / "evflownet" / "evflownet.pth"
 
 
 def main():
@@ -131,6 +209,16 @@ def main():
     model.load_state_dict(data, strict=False)
     model.eval()
     model.to(device)
+
+    evflow = None
+    if USE_EVFLOWNET:
+        if not EVFLOWNET_WEIGHTS.exists():
+            raise FileNotFoundError(f"EVFlowNet weights not found: {EVFLOWNET_WEIGHTS}")
+        evflow = EVFlowNet(batch_norm=True)
+        data = torch.load(str(EVFLOWNET_WEIGHTS), map_location=device)
+        evflow.load_state_dict(data)
+        evflow.eval()
+        evflow.to(device)
 
     # Build sequence loader
     if dataset_cfg["sequence_type"] == "fixed":
@@ -170,6 +258,7 @@ def main():
         frames_pos = []
         frames_neg = []
         frames_flow = []
+        frames_evflow = []
 
         idx_beg = seq_loader.out_len - 1
         frame_count = 0
@@ -207,15 +296,49 @@ def main():
 
             frames_pos.append(events_to_image(ev_sum, "positive"))
             frames_neg.append(events_to_image(ev_sum, "negative"))
-            frames_flow.append(flow_to_rgb(flow_np))
+            flow_img = flow_to_rgb(flow_np)
+            flow_img = overlay_flow_arrows(
+                flow_img, flow_np, step=ARROW_STEP, scale=ARROW_SCALE, thickness=ARROW_THICKNESS
+            )
+            frames_flow.append(flow_img)
+
+            if evflow is not None:
+                # Build EVFlowNet input from raw events to match inspect_events.py
+                t_ref = float(tms[0, -1].item())
+                tensor_ev = build_evflownet_tensor(
+                    seq_loader.full_events,
+                    t_ref,
+                    float(event_integration_window),
+                    int(events_cfg["height"]),
+                    int(events_cfg["width"]),
+                    side="left",
+                )
+                count = tensor_ev[:, 0]
+                stamp = tensor_ev[:, 1]
+                _, h, w = count.shape
+                event_img = np.vstack((count, stamp)).astype(np.float32)  # (4, H, W)
+                x = torch.from_numpy(event_img).unsqueeze(0).to(device)
+                x = F.interpolate(x, size=(256, 256), mode="bilinear", align_corners=False)
+                with torch.no_grad():
+                    output = evflow(x)
+                flow_ev = output["flow3"]
+                flow_ev = F.interpolate(flow_ev, size=(h, w), mode="bilinear", align_corners=False)
+                flow_ev = flow_ev.squeeze(0).permute(1, 2, 0).cpu().numpy()
+                flow_ev = np.flip(flow_ev, 2)
+
+                flow_ev_img = flow_to_rgb(flow_ev)
+                flow_ev_img = overlay_flow_arrows(
+                    flow_ev_img, flow_ev, step=ARROW_STEP, scale=ARROW_SCALE, thickness=ARROW_THICKNESS
+                )
+                frames_evflow.append(flow_ev_img)
 
             frame_count += 1
 
         frames_to_gif(
             out_dir / f"{seq_id}.gif",
-            (frames_pos, frames_neg, frames_flow),
+            (frames_pos, frames_neg, frames_flow, frames_evflow) if evflow is not None else (frames_pos, frames_neg, frames_flow),
             nrows=1,
-            ncols=3,
+            ncols=4 if evflow is not None else 3,
             duration=GIF_DURATION,
             loop=0,
         )
