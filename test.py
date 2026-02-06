@@ -288,3 +288,10 @@ for seq_id in seq_val:
 LOGGER.info("Test statistics summary:")
 table = tabulate(tab_values, headers=tab_headers, tablefmt="fancy_outline")
 print("\n".join(" "*7 + line for line in table.splitlines()))
+
+# Print average metrics across sequences
+if len(tab_values) > 0:
+    avg_metrics = np.mean(np.array(tab_values, dtype=object)[:, 2:].astype(float), axis=0)
+    avg_row = ["avg", "-", *[float(v) for v in avg_metrics]]
+    avg_table = tabulate([avg_row], headers=tab_headers, tablefmt="fancy_outline")
+    print("\n".join(" "*7 + line for line in avg_table.splitlines()))
