@@ -118,7 +118,7 @@ trainer = LunarTrainer(
 )
 
 # Train the model 
-trainer.train(num_epochs=300, max_patience=100, save_path=SAVE_PATH)
+trainer.train(num_epochs=300, max_patience=50, save_path=SAVE_PATH)
 trainer.plot_training(save_figure=True, path=SAVE_PATH, filename=f"training.png")
 
 LOGGER.info("Training completed!")
