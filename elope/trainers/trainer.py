@@ -80,7 +80,7 @@ class LunarTrainer:
         
         self.optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
         self.scheduler = ReduceLROnPlateau(
-            self.optimizer, mode='min', factor=0.5, patience=5
+            self.optimizer, mode='min', factor=0.5, patience=10
         )
         
         # Tracking
@@ -551,6 +551,7 @@ class LunarTrainer:
         # Retrieve the number of epochs between each saved checkpoint
         ckp_epochs = int(cfg_weights["checkpoint_epochs"])
         
+        patience_counter = 0
         for epoch in range(num_epochs):
             
             # Train
