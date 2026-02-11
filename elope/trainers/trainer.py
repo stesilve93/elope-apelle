@@ -616,7 +616,7 @@ class LunarTrainer:
 
             if patience_counter >= max_patience:
                 LOGGER.warning(
-                    "Early stopping triggered. No improvement for {max_patience} epochs."
+                    f"Early stopping triggered. No improvement for {max_patience} epochs."
                 )
                 break
 
