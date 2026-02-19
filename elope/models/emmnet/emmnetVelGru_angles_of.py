@@ -297,14 +297,14 @@ class CrossModalAttention(nn.Module):
     def forward(self, event_feat, angle_feat, imu_feat, range_feat):
 
         # Project features
-        e_proj = self.event_proj(event_feat)        # [B, 16, H]
-        e_proj = e_proj.permute(1, 0, 2)            # [16, B, H]     
+        e_proj = self.event_proj(event_feat)        # [B, 4, H]
+        e_proj = e_proj.permute(1, 0, 2)            # [4, B, H]
         
         i_proj = self.w_proj(imu_feat).unsqueeze(0)              # [1, B, H]
         r_proj = self.range_proj(range_feat).unsqueeze(0)        # [1, B, H]
         a_proj = self.angles_proj(angle_feat).unsqueeze(0)       # [1, B, H]
         
-        # Stack for attention (seq_len=3, batch, hidden_dim)
+        # Stack for attention (seq_len=7: 4 event + imu + range + angle)
         features = torch.cat([e_proj, i_proj, r_proj, a_proj], dim=0)
 
         # Self-attention with residual
