@@ -1,3 +1,5 @@
+import sys
+
 import cv2
 import numpy as np
 import torch
@@ -5,6 +7,10 @@ import torch.nn.functional as F
 
 from pathlib import Path
 from PIL import Image
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from elope.datasets import EventProcessor, VariableSequenceLoader, FixedSequenceLoader
 from elope.models import build_model
@@ -303,7 +309,7 @@ def main():
             frames_flow.append(flow_img)
 
             if evflow is not None:
-                # Build EVFlowNet input from raw events to match inspect_events.py
+                # Build EVFlowNet input from raw events to match analysis/inspect_events.py
                 t_ref = float(tms[0, -1].item())
                 tensor_ev = build_evflownet_tensor(
                     seq_loader.full_events,
