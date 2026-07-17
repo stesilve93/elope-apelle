@@ -18,6 +18,7 @@ cfg/training/       Model and training configurations
 best-model/         Example exported configuration for a selected model
 analysis/           Latent-space, paper-analysis, event, and flow inspection scripts
 docs/               Additional model and analysis notes
+LICENSE            MIT license for the repository
 train.py            Single split training entry point
 train_cross.py      Cross-validation training entry point
 test.py             Validation/evaluation entry point
@@ -144,9 +145,16 @@ See `analysis/README.md` for a short map of the available scripts.
   model artifacts in a release, model registry, or external storage location if
   they should be shared.
 
+## License
+
+This repository is released under the MIT License. See `LICENSE`.
+
+The license applies to the source code and repository documentation. Dataset
+files, trained checkpoints, generated outputs, and third-party assets are not
+included unless explicitly stated.
+
 ## Public Release Checklist
 
-- Add a license file if the repository will be distributed publicly.
 - Document where the dataset can be obtained, if redistribution is restricted.
 - Publish model checkpoints separately if they are too large for Git.
 - Confirm that generated files under `weights/`, `plots/`, `dataset/`, and
