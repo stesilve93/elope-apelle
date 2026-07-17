@@ -19,7 +19,7 @@ DATASET_CFG = "cfg/dataset/dataset-fix-03-last.yml"
 MODEL_CFG = "cfg/training/emmnet-angles-of.yml"
 
 # Define the indexes of the files to be used for validation
-SEQUENCE_VAL = [4, 10, 11, 19]
+SEQUENCE_VAL = [4]
 
 # Device configuration 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -118,7 +118,7 @@ trainer = LunarTrainer(
 )
 
 # Train the model 
-trainer.train(num_epochs=300, max_patience=100, save_path=SAVE_PATH)
+trainer.train(num_epochs=300, max_patience=30, save_path=SAVE_PATH)
 trainer.plot_training(save_figure=True, path=SAVE_PATH, filename=f"training.png")
 
 LOGGER.info("Training completed!")

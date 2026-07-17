@@ -1,30 +1,164 @@
-# elope
+# ELOPE
 
-In a nutshell
-Estimate velocities during lunar descents from event streams. Additionally, a rangemeter measurement is provided as well as data from the Inertial Measurment Unit (IMU).
+ELOPE is a PyTorch codebase for estimating lunar-lander velocity from event-camera
+streams, IMU telemetry, range-meter measurements, and attitude information. The
+repository contains model definitions, dataset loaders, training scripts,
+evaluation utilities, and analysis tools used to inspect learned latent spaces.
 
-Background
-In 2021, the DAVIS240 sensor became the first neuromorphic device to be launched into space and remains operational aboard the International Space Station (ISS), having been delivered as part of the Falcon Neuro Project. This milestone reflects a broader and growing interest in neuromorphic sensing and computing within the aerospace community, which has gained significant momentum over the past decade [1]. Despite this growing enthusiasm, the systematic evaluation and quantification of the benefits offered by event-based cameras in space applications are still in their early stages.
+The project is organized around YAML configuration files for the dataset and the
+model. The main scripts live at the repository root, while exploratory and
+paper-support analysis scripts live in `analysis/`.
 
-Several promising applications have been proposed for event based cameras, including star tracking [6], particle detection and tracking [3], spacecraft pose estimation [7], and autonomous landing guidance [3–4]. These proposals leverage the unique advantages of event-based vision sensors, particularly their high dynamic range, low latency, and excellent temporal resolution—characteristics that make them especially suited for the demanding and dynamic conditions encountered in space.
+## Repository Layout
 
-Event-streams from the Moon
-The ELOPE challenge is envisaged as the first of a series of challenges moving towards more and more realistic and challenging event streams. With reference to an earlier version of our dataset production pipeline, tailored at purely synthetic streams [2], the dataset we curated for ELOPE simulates optimal landings of a spacecraft on the challenging South Pole region of the Moon. There is a growing interest in landing near the Moon’s South Pole because of its incredible potential for future exploration and sustained human presence. Unlike most of the lunar surface, some areas near the South Pole are in near-constant sunlight, which is ideal for solar power generation. Even more importantly, permanently shadowed regions in nearby craters are believed to contain water ice — a critical resource for life support, fuel production, and more. Access to this ice could make long-term lunar missions far more feasible, turning the South Pole into a strategic hub for both science and future space infrastructure.
+```text
+elope/              Python package with datasets, models, trainers, and utilities
+cfg/dataset/        Dataset preprocessing and loading configurations
+cfg/training/       Model and training configurations
+best-model/         Example exported configuration for a selected model
+analysis/           Latent-space, paper-analysis, event, and flow inspection scripts
+docs/               Additional model and analysis notes
+train.py            Single split training entry point
+train_cross.py      Cross-validation training entry point
+test.py             Validation/evaluation entry point
+submit.py           Submission JSON generation entry point
+env_min.yml         Minimal Conda environment
+env_elope.yml       Full exported Conda environment
+```
 
+Local data, checkpoints, generated plots, cached datasets, and submission JSON
+files are intentionally ignored by Git through `.gitignore`.
 
-Example of a PANGU generated image.
-The landings provided in the ELOPE dataset correspond to different light conditions and landing sites close to the Malapert crater. The dataset was created by using digital elevation models of this area, which remain undisclosed and are thus not available for solving the challenge. The only sources of information during the decent are the event streams, telemetry from a simulated IMU and the readings of a rangemeter. The exact descent profiles were found applying optimal control theory to a deterministically modelled 6DOF lunar landing module with the objective to minimize propellant consumption. Be careful though as some trajectories might include corrective maneuvers, reflecting the possibility of future landers to select the safest landing spot autonomously.
+## Setup
 
-The event streams were simulated using the Planet and Asteroid Natural Scene Generation Utility (PANGU) developed by the University of Dundee’s Space Technology Centre  and the realistic dynamic vision sensor event camera data synthesis from frame-based video v2e tool, developed by the Sensors Group in ETH Zurich.
+Create the recommended Conda environment:
 
- 
+```bash
+conda env create -f env_min.yml
+conda activate elope
+```
 
-Landing Geometry
-The lunar lander in this challenge is equipped with a low-resolution event-based camera mounted on the lunar module. The 3D points of the rugged lunar surface map to a 2D image plane according to the camera geometry. The ego-motion of the lander results in an uninterrupted stream of events in this imaging plane.
+`env_elope.yml` is a fuller exported environment and can be useful when exact
+reproduction of the original development machine is needed.
 
-Since the event stream alone does not provide information about scale or absolute distances, a rangemeter is used to measure the distance corresponding to the central pixel of the imaging plane.
+## Data Layout
 
-This figure shows you the reference frames and quantities involved to describe the generic event-based landing of the spacecraft. The camera frame as well as the inertial frame used are visualized. In green, the rangemeter measurement is given.
+Place the ELOPE data under `elope_data/`:
 
-Check out the data page for a precise description of the provided information.
+```text
+elope_data/
+  train/
+    0000.npz
+    ...
+  test/
+    0000.npz
+    ...
+```
 
+Dataset YAML files in `cfg/dataset/` define the source path, cache path,
+sequence type, sampling interval, event tensor size, event encoding method, and
+event integration window. Cached datasets are written under `dataset/` when
+`save_cache: True` is enabled.
+
+## Training
+
+Edit the constants at the top of `train.py` to select the dataset config, model
+config, and validation sequences:
+
+```python
+DATASET_CFG = "cfg/dataset/dataset-fix-03-last.yml"
+MODEL_CFG = "cfg/training/emmnet-angles-of.yml"
+SEQUENCE_VAL = [4]
+```
+
+Then run:
+
+```bash
+python train.py
+```
+
+Training outputs are written under `weights/<model-name>_<timestamp>/`. Each
+run stores the copied dataset/model configs, checkpoint files, the best
+checkpoint, training plots, and optional latent logs.
+
+For cross-validation training, edit the constants at the top of `train_cross.py`
+and run:
+
+```bash
+python train_cross.py
+```
+
+## Evaluation
+
+Edit `MODEL_PATH`, validation sequence settings, and plotting options at the top
+of `test.py`, then run:
+
+```bash
+python test.py
+```
+
+The script loads `model-cfg.yml`, `dataset-cfg.yml`, and `best.pth` from the
+selected model folder, evaluates velocity predictions, and writes diagnostic
+plots under `plots/testing/` when enabled.
+
+## Submission Generation
+
+Edit `SUBMISSION_NAME`, `CROSS_TRAIN`, and related constants at the top of
+`submit.py`, then run:
+
+```bash
+python submit.py
+```
+
+The script runs inference on `elope_data/test/`, interpolates predictions to the
+trajectory timestamps, optionally replaces vertical velocity using the geometric
+range-meter constraint, and writes a submission JSON file.
+
+## Analysis Utilities
+
+Analysis and inspection scripts are kept in `analysis/`:
+
+- Latent-space comparison and manifold visualization.
+- Classical-behavior probes for learned representations.
+- Event and optical-flow visualization helpers.
+- Dataset sequence plotting utilities.
+
+Run them from the repository root, for example:
+
+```bash
+python analysis/compare_latent_spaces.py --help
+python analysis/visualize_latent_manifold.py --help
+python analysis/inspect_latents_angles.py --help
+```
+
+See `analysis/README.md` for a short map of the available scripts.
+
+## Configuration Notes
+
+- Model variants are selected with the `model` field in `cfg/training/*.yml`.
+- Event encodings are selected with `events.encoder_method` in
+  `cfg/dataset/*.yml`.
+- Most root scripts currently use top-of-file constants rather than command-line
+  arguments. Adjust those constants before running a different experiment.
+- Checkpoints are expected in `weights/`, which is ignored by Git. Keep public
+  model artifacts in a release, model registry, or external storage location if
+  they should be shared.
+
+## Public Release Checklist
+
+- Add a license file if the repository will be distributed publicly.
+- Document where the dataset can be obtained, if redistribution is restricted.
+- Publish model checkpoints separately if they are too large for Git.
+- Confirm that generated files under `weights/`, `plots/`, `dataset/`, and
+  `elope_data/` are not staged.
+
+## References
+
+```text
+Add references here before publication.
+
+Paper:
+Dataset:
+Event-camera simulator/tooling:
+Related work:
+```

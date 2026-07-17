@@ -1,4 +1,6 @@
 
+import sys
+
 import cv2
 import numpy as np 
 import torch
@@ -8,6 +10,10 @@ from PIL import Image
 from pathlib import Path
 
 from numba import njit
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from elope.evflow import EVFlowNet, load_model, pad_image_evflow, unpad_image_evflow
 from elope.utils import LOGGER

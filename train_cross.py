@@ -17,7 +17,7 @@ from elope.utils import LOGGER, load_yaml, increment_path
 DATASET_CFG = "cfg/dataset/dataset-fix-03-last.yml"
 
 # Path to the yaml file containing the model settings
-MODEL_CFG = "cfg/training/emmnet-angles.yml"
+MODEL_CFG = "cfg/training/emmnet-angles-of.yml"
 
 # Number of groups in which to split the validation dataset
 N_GROUPS = 7
@@ -108,9 +108,9 @@ for k in range(N_GROUPS):
         batch_size=32,
         shuffle=True, 
         num_workers=8, 
-        rangemeter_noise=0.005, 
-        angles_noise=0.001, 
-        angles_vel_noise=0.001
+        rangemeter_noise=0.00, 
+        angles_noise=0.00, 
+        angles_vel_noise=0.00
     )
 
     val_loader = ElopeDataLoader(

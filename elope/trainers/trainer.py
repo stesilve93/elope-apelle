@@ -80,13 +80,14 @@ class LunarTrainer:
         
         self.optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
         self.scheduler = ReduceLROnPlateau(
-            self.optimizer, mode='min', factor=0.5, patience=5
+            self.optimizer, mode='min', factor=0.5, patience=10
         )
         
         # Tracking
         self.train_losses = []
         self.val_losses = []
         self.best_val_loss = float('inf')
+        self.best_val_epoch = None
 
         # Optional latent logging
         self.latent_log = latent_log or {}
@@ -550,6 +551,7 @@ class LunarTrainer:
         # Retrieve the number of epochs between each saved checkpoint
         ckp_epochs = int(cfg_weights["checkpoint_epochs"])
         
+        patience_counter = 0
         for epoch in range(num_epochs):
             
             # Train
@@ -581,6 +583,7 @@ class LunarTrainer:
             # Save best model
             if val_loss < self.best_val_loss:
                 self.best_val_loss = val_loss
+                self.best_val_epoch = epoch + 1
                 torch.save(self.model.state_dict(), save_path_model / "best.pth")
                 print(
                     " "*6, f"New best model saved! Val. Metric ({self.val_metric_key}): "
@@ -596,13 +599,24 @@ class LunarTrainer:
             loss_names = tuple(loss_metrics.keys())
             loss_values = tuple([loss_metrics[ln] for ln in loss_names])
             
+            if self.best_val_epoch is None:
+                best_epoch_label = "n/a"
+                best_loss_label = "n/a"
+            else:
+                best_epoch_label = f"{self.best_val_epoch:02d}"
+                best_loss_label = f"{self.best_val_loss:.6f}"
+
+            print(
+                " " * 7
+                + f"Best ({self.val_metric_key}): {best_loss_label} @ epoch {best_epoch_label}"
+            )
             print((" " * 6 + '%20s' * len(loss_names)) % loss_names)
             print((" " * 6 + '%20.5f' * len(loss_names)) % loss_values)
             print("\n")
 
             if patience_counter >= max_patience:
                 LOGGER.warning(
-                    "Early stopping triggered. No improvement for {max_patience} epochs."
+                    f"Early stopping triggered. No improvement for {max_patience} epochs."
                 )
                 break
 
