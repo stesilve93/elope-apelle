@@ -162,5 +162,5 @@ included unless explicitly stated.
 
 ## References
 
-Silvestrini, S. and Ceresoli, M. (2026). *On the Geometry of Learned Representations in Event-Based Egomotion Estimation*. arXiv preprint arXiv:2607.15794. [paper]([https://arxiv.org](https://arxiv.org/html/2607.15794v1))
+Silvestrini, S. and Ceresoli, M. (2026). *On the Geometry of Learned Representations in Event-Based Egomotion Estimation*. arXiv preprint arXiv:2607.15794. [paper][https://arxiv.org](https://arxiv.org/html/2607.15794v1)
 
