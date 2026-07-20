@@ -161,12 +161,6 @@ included unless explicitly stated.
   `elope_data/` are not staged.
 
 ## References
-
-```text
-Add references here before publication.
-
-Paper:
-Dataset:
-Event-camera simulator/tooling:
-Related work:
+```
+Silvestrini, S. and Ceresoli, M. (2026). *On the Geometry of Learned Representations in Event-Based Egomotion Estimation*. arXiv preprint arXiv:2607.15794. [https://arxiv.org](https://arxiv.org)
 ```
