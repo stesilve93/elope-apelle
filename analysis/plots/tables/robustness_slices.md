@@ -1,0 +1,20 @@
+| model             | slice               |    n |     rmse |      mae |   median_error |
+|:------------------|:--------------------|-----:|---------:|---------:|---------------:|
+| with_flow_best    | all                 | 4337 |  9.26915 | 3.11663  |        4.29606 |
+| with_flow_best    | low_speed           | 1085 |  2.17667 | 0.868996 |        1.40673 |
+| with_flow_best    | high_speed          | 1085 | 14.2381  | 5.73486  |        9.01941 |
+| with_flow_best    | low_lateral_speed   | 1085 |  2.19701 | 0.87454  |        1.41387 |
+| with_flow_best    | high_lateral_speed  | 1085 | 14.7644  | 6.03839  |        9.73503 |
+| with_flow_best    | low_vertical_speed  | 1085 |  4.32296 | 1.23734  |        1.51487 |
+| with_flow_best    | high_vertical_speed | 1085 | 12.19    | 4.69584  |        7.30456 |
+| with_flow_best    | low_event_density   | 1085 | 12.6001  | 4.2828   |        5.88305 |
+| with_flow_best    | high_event_density  | 1085 |  6.48085 | 2.20625  |        2.92831 |
+| without_flow_best | all                 | 4337 | 17.4948  | 5.63344  |        7.5319  |
+| without_flow_best | low_speed           | 1085 |  7.20521 | 1.88403  |        2.53663 |
+| without_flow_best | high_speed          | 1085 | 19.6779  | 8.41179  |       15.0267  |
+| without_flow_best | low_lateral_speed   | 1085 |  9.56678 | 2.12839  |        2.50852 |
+| without_flow_best | high_lateral_speed  | 1085 | 22.255   | 9.23533  |       15.3306  |
+| without_flow_best | low_vertical_speed  | 1085 | 10.1777  | 2.28848  |        2.77636 |
+| without_flow_best | high_vertical_speed | 1085 | 16.6613  | 6.98022  |       13.7728  |
+| without_flow_best | low_event_density   | 1085 | 23.1535  | 7.79905  |        9.66641 |
+| without_flow_best | high_event_density  | 1085 | 10.5209  | 3.66278  |        5.45484 |

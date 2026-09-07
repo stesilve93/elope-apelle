@@ -1,0 +1,22 @@
+| model             | analysis    | target      | metric      |     value |    n |
+|:------------------|:------------|:------------|:------------|----------:|-----:|
+| with_flow_best    | cca         | canonical_1 | correlation |  0.999324 | 4337 |
+| with_flow_best    | cca         | canonical_2 | correlation |  0.999123 | 4337 |
+| with_flow_best    | cca         | canonical_3 | correlation |  0.983987 | 4337 |
+| with_flow_best    | cca         | canonical_4 | correlation |  0.999451 | 4337 |
+| with_flow_best    | ridge_probe | velocity    | r2          |  0.964548 | 4337 |
+| with_flow_best    | ridge_probe | velocity    | rmse        | 14.5254   | 4337 |
+| with_flow_best    | ridge_probe | velocity    | mae         |  5.88946  | 4337 |
+| with_flow_best    | ridge_probe | speed       | r2          |  0.990672 | 4337 |
+| with_flow_best    | ridge_probe | speed       | rmse        |  4.29983  | 4337 |
+| with_flow_best    | ridge_probe | speed       | mae         |  2.95521  | 4337 |
+| without_flow_best | cca         | canonical_1 | correlation |  0.999065 | 4337 |
+| without_flow_best | cca         | canonical_2 | correlation |  0.996785 | 4337 |
+| without_flow_best | cca         | canonical_3 | correlation |  0.999564 | 4337 |
+| without_flow_best | cca         | canonical_4 | correlation |  0.977055 | 4337 |
+| without_flow_best | ridge_probe | velocity    | r2          |  0.95988  | 4337 |
+| without_flow_best | ridge_probe | velocity    | rmse        | 16.4704   | 4337 |
+| without_flow_best | ridge_probe | velocity    | mae         |  6.65863  | 4337 |
+| without_flow_best | ridge_probe | speed       | r2          |  0.9544   | 4337 |
+| without_flow_best | ridge_probe | speed       | rmse        |  9.50681  | 4337 |
+| without_flow_best | ridge_probe | speed       | mae         |  5.89285  | 4337 |

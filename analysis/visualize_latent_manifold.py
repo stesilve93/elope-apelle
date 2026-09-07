@@ -59,7 +59,7 @@ def _setup_style() -> None:
         return
     plt.rcParams.update(
         {
-            "figure.dpi": 120,
+            "figure.dpi": 300,
             "axes.facecolor": "#f8fafc",
             "axes.edgecolor": "#334155",
             "axes.labelcolor": "#0f172a",
