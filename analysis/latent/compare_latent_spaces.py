@@ -7,8 +7,8 @@ representation geometry, linear probes, attention, event density, and temporal
 behavior for a with-flow and a without-flow model.
 
 The `--out` directory receives extracted `.npz` packs when inference is needed,
-JSON metrics and alignment statistics, `report.md`, and a `plots/` directory of
-comparison figures. Run from the repository root; see `--help` for input modes.
+JSON metrics and alignment statistics, and a `plots/` directory of comparison
+figures. Run from the repository root; see `--help` for input modes.
 """
 
 import argparse
@@ -24,7 +24,7 @@ from typing import Any
 import numpy as np
 import torch
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -1518,98 +1518,6 @@ def _save_json(path: Path, data: Any) -> None:
         json.dump(data, f, indent=2, default=_json_default)
 
 
-def _write_report(
-    out_path: Path,
-    alignment_stats: dict[str, Any],
-    flow_name: str,
-    noflow_name: str,
-    a_flow: dict[str, Any],
-    a_noflow: dict[str, Any],
-    cmp: dict[str, Any],
-) -> None:
-    def fmt(x: float) -> str:
-        if isinstance(x, float) and (math.isnan(x) or math.isinf(x)):
-            return "N/A"
-        return f"{x:.6f}"
-
-    lines = []
-    lines.append("# Latent Space Comparison Report")
-    lines.append("")
-    lines.append(f"- Flow model: `{flow_name}`")
-    lines.append(f"- No-flow model: `{noflow_name}`")
-    lines.append(f"- Aligned samples: `{alignment_stats['matched']}` (mode: `{alignment_stats['mode']}`)")
-    lines.append("")
-    lines.append("## Core comparison")
-    lines.append("")
-    lines.append("| Metric | Flow | No-flow | Delta (Flow - No-flow) |")
-    lines.append("|---|---:|---:|---:|")
-    rows = [
-        ("Pred RMSE", a_flow["basic"]["pred_rmse"], a_noflow["basic"]["pred_rmse"], cmp["deltas"]["pred_rmse_delta_flow_minus_noflow"]),
-        ("Velocity probe R2 (mean)", a_flow["probes"]["velocity_regression"]["r2_mean"], a_noflow["probes"]["velocity_regression"]["r2_mean"], cmp["deltas"]["vel_probe_r2_delta_flow_minus_noflow"]),
-        ("Speed-bin probe accuracy", a_flow["probes"]["speed_bin_probe"]["accuracy"], a_noflow["probes"]["speed_bin_probe"]["accuracy"], cmp["deltas"]["speed_probe_acc_delta_flow_minus_noflow"]),
-        ("Direction probe accuracy", a_flow["probes"]["direction_probe"]["accuracy"], a_noflow["probes"]["direction_probe"]["accuracy"], cmp["deltas"]["direction_probe_acc_delta_flow_minus_noflow"]),
-        ("Static/dynamic probe accuracy", a_flow["probes"]["static_dynamic_probe"]["accuracy"], a_noflow["probes"]["static_dynamic_probe"]["accuracy"], cmp["deltas"]["static_dynamic_probe_acc_delta_flow_minus_noflow"]),
-        ("Participation ratio", a_flow["geometry"]["participation_ratio"], a_noflow["geometry"]["participation_ratio"], cmp["deltas"]["participation_ratio_delta_flow_minus_noflow"]),
-        ("Intrinsic dim (LB)", a_flow["geometry"]["intrinsic_dim_lb"], a_noflow["geometry"]["intrinsic_dim_lb"], cmp["deltas"]["intrinsic_dim_delta_flow_minus_noflow"]),
-        ("kNN direction purity", a_flow["knn"]["purity_direction_k10"], a_noflow["knn"]["purity_direction_k10"], cmp["deltas"]["knn_direction_purity_delta_flow_minus_noflow"]),
-    ]
-    for k, v1, v2, dv in rows:
-        lines.append(f"| {k} | {fmt(v1)} | {fmt(v2)} | {fmt(dv)} |")
-    lines.append("")
-    lines.append("## PCA Variance")
-    lines.append("")
-    ef = a_flow["geometry"].get("explained_var_top3", [float("nan")] * 3)
-    en = a_noflow["geometry"].get("explained_var_top3", [float("nan")] * 3)
-    lines.append(f"- Flow explained variance (PC1/PC2/PC3): `{fmt(ef[0])}`, `{fmt(ef[1])}`, `{fmt(ef[2])}`")
-    lines.append(f"- No-flow explained variance (PC1/PC2/PC3): `{fmt(en[0])}`, `{fmt(en[1])}`, `{fmt(en[2])}`")
-    lines.append("")
-    lines.append("## Representation shift")
-    lines.append("")
-    lines.append("| Layer | CKA | SVCCA |")
-    lines.append("|---|---:|---:|")
-    for ln, vals in cmp["layer_similarity"].items():
-        lines.append(f"| {ln} | {fmt(vals['cka'])} | {fmt(vals['svcca'])} |")
-    lines.append("")
-    lines.append("## Distribution shift")
-    lines.append("")
-    lines.append(f"- Fréchet distance: `{fmt(cmp['distribution_shift']['frechet_distance'])}`")
-    lines.append(f"- MMD (RBF): `{fmt(cmp['distribution_shift']['mmd_rbf'])}`")
-    lines.append("")
-    lines.append("## Temporal validity")
-    lines.append("")
-    lines.append(f"- Flow temporal segments: `{a_flow['temporal']['num_segments']}`")
-    lines.append(f"- No-flow temporal segments: `{a_noflow['temporal']['num_segments']}`")
-    lines.append("")
-    lines.append("## Probe Validity")
-    lines.append("")
-    for pname in ["speed_bin_probe", "direction_probe", "static_dynamic_probe", "motion_boundary_probe"]:
-        deg_f = bool(a_flow["probes"][pname].get("degenerate", False))
-        deg_n = bool(a_noflow["probes"][pname].get("degenerate", False))
-        lines.append(
-            f"- `{pname}`: flow degenerate=`{deg_f}`, no-flow degenerate=`{deg_n}`"
-        )
-
-    if len(a_flow.get("sequence_metrics", {})) > 0 and len(a_noflow.get("sequence_metrics", {})) > 0:
-        lines.append("")
-        lines.append("## Sequence Highlights")
-        lines.append("")
-        lines.append("| Sequence | Flow RMSE | No-flow RMSE | Delta (Flow - No-flow) |")
-        lines.append("|---|---:|---:|---:|")
-        common = sorted(set(a_flow["sequence_metrics"]).intersection(a_noflow["sequence_metrics"]))
-        rows = []
-        for sid in common:
-            rf = a_flow["sequence_metrics"][sid]["rmse"]
-            rn = a_noflow["sequence_metrics"][sid]["rmse"]
-            rows.append((sid, rf, rn, rf - rn))
-        rows = sorted(rows, key=lambda x: x[3])[:10]
-        for sid, rf, rn, d in rows:
-            lines.append(f"| {sid} | {fmt(rf)} | {fmt(rn)} | {fmt(d)} |")
-
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
-
-
 def _build_pack(
     name: str,
     latents_path: str | None,
@@ -1659,7 +1567,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Compare latent spaces between flow-head and no-flow models."
     )
-    parser.add_argument("--out", default="plots/latent_compare", help="Output directory")
+    parser.add_argument(
+        "--out",
+        default="analysis/outputs/latent/comparison",
+        help="Output directory",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default=None, help="cuda or cpu (default: auto)")
     parser.add_argument("--sequences", default=None, help="Comma-separated sequence ids, e.g. 0004,0010")
@@ -1784,16 +1696,6 @@ def main() -> None:
     _save_json(out_dir / f"analysis_{args.flow_name}.json", analysis_flow)
     _save_json(out_dir / f"analysis_{args.noflow_name}.json", analysis_noflow)
     _save_json(out_dir / "comparison.json", comparison)
-
-    _write_report(
-        out_path=out_dir / "report.md",
-        alignment_stats=alignment_stats,
-        flow_name=args.flow_name,
-        noflow_name=args.noflow_name,
-        a_flow=analysis_flow,
-        a_noflow=analysis_noflow,
-        cmp=comparison,
-    )
 
     print(f"Saved analysis to: {out_dir}")
     print(f"Aligned samples: {alignment_stats['matched']} (mode={alignment_stats['mode']})")

@@ -476,7 +476,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Create aesthetic 2D/3D latent manifold visualizations.")
     parser.add_argument("--npz", required=True, help="Path to extracted latent .npz (e.g. extracted_with_flow_best.npz)")
     parser.add_argument("--name", default="with_flow_best")
-    parser.add_argument("--out", default="plots/latent_manifold")
+    parser.add_argument("--out", default="analysis/outputs/latent/manifold")
     parser.add_argument("--method", default="auto", choices=["auto", "pca", "tsne", "umap"])
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max-samples", type=int, default=7000)

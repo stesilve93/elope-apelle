@@ -9,7 +9,7 @@ sentence. No benchmark files or model artifacts are created or changed.
 
 Run from the repository root, for example:
 
-python analysis/benchmark_inference_latency.py \
+python analysis/performance/benchmark_inference_latency.py \
   --model-dir weights/emmnet-angles-of_20260209_144255 \
   --devices cpu cuda
 """
@@ -27,7 +27,7 @@ import torch
 import yaml
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from elope.models import build_model  # noqa: E402
 

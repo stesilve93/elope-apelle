@@ -16,12 +16,12 @@ and does not alter the checkpoint or dataset.
 
 Example
 -------
-python analysis/visualize_event_flow_pipeline.py \\
+python analysis/flow_visualization/visualize_event_flow_pipeline.py \\
   --model-dir weights/emmnet-angles-of_20260211_191017 \\
   --split train \\
   --sequence 0010 \\
   --index 72 \\
-  --out analysis/plots/figures_paper/event_flow_pipeline_0010.png
+  --out analysis/outputs/flow/event_flow_pipeline_0010.png
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ from matplotlib import colors
 from matplotlib.gridspec import GridSpec
 from scipy.interpolate import PchipInterpolator
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -385,7 +385,11 @@ def main() -> None:
     parser.add_argument("--sequence", default="0010")
     parser.add_argument("--index", type=int, default=None)
     parser.add_argument("--time", type=float, default=None, help="Reference time in seconds. Ignored if --index is set.")
-    parser.add_argument("--out", type=Path, default=Path("analysis/plots/figures_paper/event_flow_pipeline.png"))
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=Path("analysis/outputs/flow/event_flow_pipeline.png"),
+    )
     parser.add_argument("--device", default=None)
     parser.add_argument("--arrow-step", type=int, default=14)
     parser.add_argument("--arrow-scale", type=float, default=1.4)

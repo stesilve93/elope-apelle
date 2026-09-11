@@ -10,9 +10,10 @@ with-flow and without-flow checkpoints; `--reuse-artifacts` validates and reuses
 existing packs. It then computes held-out probes, reliability, representation
 similarity, attention, and latent-space metrics.
 
-Extracted packs are stored in `analysis/revision_latents/`. CSV tables, PNG/PDF
-figures, and `summary.md` are written under
-`analysis/revision_validation_analysis/`. Source checkpoints are not modified.
+Extracted packs are stored in `analysis/outputs/revision/latents/`. CSV tables,
+PNG/PDF figures are written under
+`analysis/outputs/revision/validation_analysis/`. Source checkpoints are not
+modified.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ import argparse
 import json
 import math
 import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -41,7 +43,11 @@ from sklearn.linear_model import Ridge
 from sklearn.metrics import accuracy_score, mean_absolute_error, r2_score, roc_auc_score
 from sklearn.preprocessing import StandardScaler
 
-from compare_latent_spaces import (
+ROOT = Path(__file__).resolve().parents[3]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from analysis.latent.compare_latent_spaces import (
     LatentPack,
     _cka_linear,
     _cov_eigs,
@@ -59,9 +65,8 @@ from compare_latent_spaces import (
 )
 
 
-ROOT = Path(__file__).resolve().parents[1]
-LATENT_DIR = ROOT / "analysis" / "revision_latents"
-OUT_DIR = ROOT / "analysis" / "revision_validation_analysis"
+LATENT_DIR = ROOT / "analysis" / "outputs" / "revision" / "latents"
+OUT_DIR = ROOT / "analysis" / "outputs" / "revision" / "validation_analysis"
 OLD_DIR = ROOT / "plots" / "latent_compare_best_3"
 MODEL_DIRS = {
     "with_flow": ROOT / "weights" / "emmnet-angles-of_20260209_144255",
@@ -577,166 +582,6 @@ def make_figures(packs: dict[str, dict[str, LatentPack]], reliability: pd.DataFr
     _save_figure(fig, figure_dir / "validation_attention")
 
 
-def write_summary(packs: dict[str, dict[str, LatentPack]], tables: dict[str, pd.DataFrame], path: Path) -> None:
-    latent, probes, cca, reliability, similarity = (tables[k] for k in ("latent", "probe", "cca", "reliability", "similarity"))
-    def val(df: pd.DataFrame, model: str, metric: str, key: str = "metric") -> float:
-        return float(df[(df.model == model) & (df[key] == metric)].iloc[0].value)
-    lines = [
-        "# Held-out validation latent-space revision",
-        "",
-        "This is a minimal correction of the submitted diagnostic analysis. It does not change the ELOPE inputs, event representation, 0.3 s event window, model architecture, checkpoints, training protocol, or official benchmark result.",
-        "",
-        "## Split and fit/evaluation contract",
-        "",
-        "- Training samples: **4215** from trajectories `0000`--`0027` except `0004`.",
-        "- Validation samples: **122** from held-out trajectory **`0004`**.",
-        "- Fitted on training only: Ledoit--Wolf latent mean/covariance, high-error cutoff, Mahalanobis decile/rejection cutoffs, ridge probes and scalers, class thresholds, CCA/scalers, and PCA.",
-        "- Evaluated on validation only: reliability correlations/AUC/gates, probe scores, CCA correlations, PCA projections, attention summaries, and train-reference/validation-query neighborhoods.",
-        "- CKA/SVCCA use 122 aligned held-out validation samples and no labels. SVCCA is reported with an explicit small-sample caution.",
-        "- Assertions verify disjoint `(trajectory_id, timestamp)` keys, exact row counts/trajectory IDs, and numerical agreement with the corresponding rows of the submitted inference export.",
-        "- **Validation data are never used to fit diagnostic quantities.**",
-        "- Hybrid velocity is not saved because it was not present in the submitted latent artifacts; `predicted_learned_velocity` is the unchanged network output.",
-        "",
-        "## Old combined-pool versus held-out result",
-        "",
-        "Every replacement CSV includes `old_combined_value` beside the corrected `value`; the old column reproduces or recomputes the submitted 4337-row analysis. Key replacements are:",
-        "",
-        "| Metric | With flow: old -> held-out | Without flow: old -> held-out |",
-        "|---|---:|---:|",
-    ]
-    summary_metrics = [
-        ("Context velocity RMSE (combined -> validation)", latent, "validation_velocity_rmse", "metric"),
-        ("Velocity probe mean-component R2", probes[probes.probe == "z_t_to_v_t"], "r2_mean_components", "metric"),
-        ("Mahalanobis/error Spearman", reliability[reliability.analysis == "summary"], "spearman_mahalanobis_error", "metric"),
-        ("Mahalanobis high-error AUC", reliability[reliability.analysis == "summary"], "high_error_auc", "metric"),
-        ("CCA canonical 1", cca, "canonical_1_correlation", "metric"),
-    ]
-    for label, df, metric, key in summary_metrics:
-        cells = []
-        for model in MODEL_DIRS:
-            row = df[(df.model == model) & (df[key] == metric)].iloc[0]
-            cells.append(f"{row.old_combined_value:.4f} -> {row.value:.4f}")
-        lines.append(f"| {label} | {cells[0]} | {cells[1]} |")
-    for metric in ("participation_ratio", "effective_rank", "k90", "k95"):
-        cells = []
-        for model in MODEL_DIRS:
-            row = latent[(latent.model == model) & (latent.metric == metric)].iloc[0]
-            cells.append(f"{row.old_combined_value:.4f} -> {row.value:.4f}")
-        lines.append(f"| Training-distribution {metric} | {cells[0]} | {cells[1]} |")
-    for metric in ("speed_bin_purity_k10", "direction_purity_k10", "static_dynamic_purity_k10"):
-        cells = []
-        for model in MODEL_DIRS:
-            row = latent[(latent.model == model) & (latent.metric == metric)].iloc[0]
-            cells.append(f"{row.old_combined_value:.4f} -> {row.value:.4f}")
-        lines.append(f"| Train-reference validation-query {metric} | {cells[0]} | {cells[1]} |")
-    for representation in ("fused", "event_encoder"):
-        for metric in ("cka", "svcca"):
-            row = similarity[(similarity.representation == representation) & (similarity.metric == metric)].iloc[0]
-            lines.append(f"| {representation} {metric.upper()} | {row.old_combined_value:.4f} -> {row.value:.4f} | same aligned sample set |")
-
-    lines += [
-        "",
-        "### State-sufficiency and classification replacements",
-        "",
-        "| Model | Probe metric | Old combined | Held-out validation |",
-        "|---|---|---:|---:|",
-    ]
-    probe_display = {
-        "z_t_to_v_t": "R2 global",
-        "z_t_z_t-1_to_v_t": "R2 global",
-        "z_t_z_t-1_z_t-2_to_v_t": "R2 global",
-        "z_t_to_z_t+1": "R2 global",
-        "z_t_to_v_t+1": "R2 global",
-        "speed_bin": "accuracy",
-        "direction": "accuracy",
-        "static_dynamic": "accuracy",
-    }
-    for model in MODEL_DIRS:
-        for probe_name, display_metric in probe_display.items():
-            metric_name = "r2_global" if display_metric == "R2 global" else "accuracy"
-            row = probes[(probes.model == model) & (probes.probe == probe_name) & (probes.metric == metric_name)].iloc[0]
-            lines.append(f"| {model} | `{probe_name}` {display_metric} | {row.old_combined_value:.6f} | {row.value:.6f} |")
-
-    lines += [
-        "",
-        "### CCA replacements",
-        "",
-        "Absolute canonical correlations are the headline values below. The CSV additionally preserves signed held-out correlations; component 3 reverses sign on validation for both models.",
-        "",
-        "| Model | Component | Old combined | Held-out validation |",
-        "|---|---:|---:|---:|",
-    ]
-    for model in MODEL_DIRS:
-        for component in range(1, 5):
-            row = cca[(cca.model == model) & (cca.metric == f"canonical_{component}_correlation")].iloc[0]
-            lines.append(f"| {model} | {component} | {row.old_combined_value:.6f} | {row.value:.6f} |")
-
-    lines += [
-        "",
-        "### Reliability replacements",
-        "",
-        "Risk cutoffs below are training quantiles. Consequently, the nominal rejection percentage is not forced on validation.",
-        "",
-        "| Model | Metric | Old combined | Held-out validation |",
-        "|---|---|---:|---:|",
-    ]
-    for model in MODEL_DIRS:
-        for metric in ("spearman_mahalanobis_error", "high_error_auc"):
-            row = reliability[(reliability.model == model) & (reliability.analysis == "summary") & (reliability.metric == metric)].iloc[0]
-            lines.append(f"| {model} | {metric} | {row.old_combined_value:.6f} | {row.value:.6f} |")
-        for metric in ("retained_rmse", "high_error_recall"):
-            row = reliability[(reliability.model == model) & (reliability.analysis == "risk_gate") &
-                              (reliability.metric == metric) & (reliability.nominal_reject_percent == 10)].iloc[0]
-            lines.append(f"| {model} | 10% training-cutoff {metric} | {row.old_combined_value:.6f} | {row.value:.6f} |")
-    wf_one = reliability[(reliability.model == "with_flow") & (reliability.analysis == "risk_gate") &
-                         (reliability.metric == "retained_rmse") & (reliability.nominal_reject_percent == 1)].iloc[0]
-    nf_one = reliability[(reliability.model == "without_flow") & (reliability.analysis == "risk_gate") &
-                         (reliability.metric == "retained_rmse") & (reliability.nominal_reject_percent == 1)].iloc[0]
-    lines += [
-        "",
-        f"The training 1% risk cutoffs reject `{int(wf_one.validation_rejected_n)}/122` with-flow and `{int(nf_one.validation_rejected_n)}/122` without-flow validation windows. Several low training-risk deciles therefore contain no validation samples; these remain explicit as empty/NaN CSV rows rather than being re-binned on validation.",
-        "",
-        "### Attention replacements",
-        "",
-        "| Model | Group | Statistic | Old combined | Held-out validation |",
-        "|---|---|---|---:|---:|",
-    ]
-    attention = tables["attention"]
-    for _, row in attention.iterrows():
-        statistic = row.metric if row.context == "none" else f"{row.metric} vs {row.context}"
-        lines.append(f"| {row.model} | {row.attention_group} | {statistic} | {row.old_combined_value:.6f} | {row.value:.6f} |")
-
-    flow_probe = val(probes[probes.probe == "z_t_to_v_t"], "with_flow", "r2_mean_components")
-    noflow_probe = val(probes[probes.probe == "z_t_to_v_t"], "without_flow", "r2_mean_components")
-    flow_knn = val(latent, "with_flow", "direction_purity_k10")
-    noflow_knn = val(latent, "without_flow", "direction_purity_k10")
-    risk_auc = val(reliability[reliability.analysis == "summary"], "with_flow", "high_error_auc")
-    lines += [
-        "",
-        "## Claim audit",
-        "",
-        "- **Remains supported:** training-distribution compactness/rank ordering is essentially unchanged when validation is excluded; the with-flow and without-flow representations also remain strongly similar on aligned validation samples by fused CKA.",
-        f"- **Weakens or disappears:** the strong state-sufficiency/linear velocity-decodability claim does not survive trajectory-held-out evaluation (with-flow/no-flow velocity-probe R2 `{flow_probe:.3f}`/`{noflow_probe:.3f}`). Negative R2 means the fitted probe is worse than predicting the validation-trajectory mean.",
-        f"- **Weakens or disappears:** neighborhood superiority is not supported as a general claim (direction purity `{flow_knn:.3f}` vs `{noflow_knn:.3f}` on one validation trajectory).",
-        f"- **Requires weakened wording:** Mahalanobis distance is a descriptive validation risk indicator (with-flow AUC `{risk_auc:.3f}`), not calibrated uncertainty and not cross-validated performance.",
-        "- **Remove if stated broadly:** claims of generalization across trajectories or stable SVCCA structure; only one 122-window held-out trajectory is available and SVCCA can be numerically sensitive at this sample count.",
-        "- Official ELOPE challenge/postmortem performance claims remain unchanged and are not replaced by this diagnostic validation RMSE.",
-        "",
-        "## Manuscript replacements",
-        "",
-        "- Replace the combined-pool latent/probe/CCA/reliability/attention tables with the CSVs in `tables/`.",
-        "- Replace the risk-gate, risk-calibration, PCA, and attention figures with the files in `figures/` (PNG and vector PDF).",
-        "- Replace mixed-pool CKA/SVCCA and neighborhood values with `representation_similarity.csv` and the k-NN rows in `latent_metrics.csv`.",
-        "- Remove any transductive mixed-pool neighborhood result, any jointly fitted PCA visualization, and any wording implying validation-fitted diagnostics.",
-        "- Retain official benchmark figures/tables unchanged.",
-        "",
-        "## Files",
-        "",
-        "The four split artifacts are in `../revision_latents/`. Exact numerical results are in the six requested CSV tables; figures are direct held-out replacements.",
-    ]
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
 def _setup_plot_style(font_size: float = 10) -> None:
     plt.rcParams.update(
         {
@@ -780,7 +625,6 @@ def main() -> None:
     for key, df in tables.items():
         df.to_csv(table_dir / names[key], index=False, float_format="%.12g")
     make_figures(packs, tables["reliability"], figure_dir)
-    write_summary(packs, tables, OUT_DIR / "summary.md")
     print(f"Completed held-out revision analysis on {device}.")
     print(f"Latents: {LATENT_DIR}")
     print(f"Results: {OUT_DIR}")

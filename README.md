@@ -127,9 +127,9 @@ Analysis and inspection scripts are kept in `analysis/`:
 Run them from the repository root, for example:
 
 ```bash
-python analysis/compare_latent_spaces.py --help
-python analysis/visualize_latent_manifold.py --help
-python analysis/inspect_latents_angles.py --help
+python analysis/latent/compare_latent_spaces.py --help
+python analysis/latent/visualize_latent_manifold.py --help
+python analysis/latent/inspect_latents_angles.py --help
 ```
 
 See `analysis/README.md` for a short map of the available scripts.

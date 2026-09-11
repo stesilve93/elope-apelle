@@ -5,9 +5,9 @@ contain fused latents, predictions, velocity/position targets, event density,
 and sequence IDs. The analysis tests linear decodability and relationships with
 motion, error, event density, and trajectory structure.
 
-The `--out` directory receives per-model JSON metrics, a Markdown report, PNG
-plots, and either comparison deltas or single-model verdicts. Source packs are
-read-only. Run from the repository root and use `--help` for options.
+The `--out` directory receives per-model JSON metrics, PNG plots, and either
+comparison deltas or single-model verdicts. Source packs are read-only. Run from
+the repository root and use `--help` for options.
 """
 
 import argparse
@@ -695,161 +695,15 @@ def _single_verdicts(m: dict[str, Any]) -> dict[str, str]:
     return out
 
 
-def save_report(path: Path, flow: dict[str, Any], noflow: dict[str, Any] | None, delta: dict[str, Any] | None) -> None:
-    def fmt(x: float) -> str:
-        if x is None or not np.isfinite(x):
-            return "N/A"
-        return f"{x:.6f}"
-
-    lines = []
-    lines.append("# Classical-Hint Analysis from Latents")
-    lines.append("")
-    lines.append(f"- Primary model: `{flow['name']}`")
-    if noflow is not None:
-        lines.append(f"- Comparator model: `{noflow['name']}`")
-    else:
-        lines.append("- Comparator model: `None (single-model mode)`")
-    lines.append("")
-    lines.append("## 1) State Sufficiency")
-    lines.append("")
-    if noflow is None:
-        lines.append("| Metric | Value |")
-        lines.append("|---|---:|")
-        for k in ["lag0_r2", "lag1_r2", "lag2_r2", "history_gain_lag2_minus_lag0"]:
-            lines.append(f"| {k} | {fmt(flow['state_sufficiency'][k])} |")
-    else:
-        lines.append("| Metric | Flow | No-flow | Delta |")
-        lines.append("|---|---:|---:|---:|")
-        for k in ["lag0_r2", "lag1_r2", "lag2_r2", "history_gain_lag2_minus_lag0"]:
-            lines.append(
-                f"| {k} | {fmt(flow['state_sufficiency'][k])} | {fmt(noflow['state_sufficiency'][k])} | {fmt(flow['state_sufficiency'][k]-noflow['state_sufficiency'][k])} |"
-            )
-
-    lines.append("")
-    lines.append("## 2) Local Linear Dynamics")
-    lines.append("")
-    if noflow is None:
-        lines.append("| Metric | Value |")
-        lines.append("|---|---:|")
-        for k in ["latent_next_r2_global", "vel_next_from_latent_r2_global"]:
-            lines.append(f"| {k} | {fmt(flow['linear_dynamics'][k])} |")
-    else:
-        lines.append("| Metric | Flow | No-flow | Delta |")
-        lines.append("|---|---:|---:|---:|")
-        for k in ["latent_next_r2_global", "vel_next_from_latent_r2_global"]:
-            lines.append(
-                f"| {k} | {fmt(flow['linear_dynamics'][k])} | {fmt(noflow['linear_dynamics'][k])} | {fmt(flow['linear_dynamics'][k]-noflow['linear_dynamics'][k])} |"
-            )
-
-    lines.append("")
-    lines.append("## 3) Innovation-Like Residuals")
-    lines.append("")
-    if noflow is None:
-        lines.append("| Metric | Value |")
-        lines.append("|---|---:|")
-    else:
-        lines.append("| Metric | Flow | No-flow | Delta |")
-        lines.append("|---|---:|---:|---:|")
-    k = "whiteness_index_abs_ac_lag1to5"
-    if noflow is None:
-        lines.append(f"| {k} | {fmt(flow['residual_whiteness'][k])} |")
-    else:
-        lines.append(
-            f"| {k} | {fmt(flow['residual_whiteness'][k])} | {fmt(noflow['residual_whiteness'][k])} | {fmt(flow['residual_whiteness'][k]-noflow['residual_whiteness'][k])} |"
-        )
-    lines.append("")
-    lines.append("Smaller whiteness index is better (less residual autocorrelation).")
-
-    lines.append("")
-    lines.append("## 4) Observability-Aware Proxy")
-    lines.append("")
-    keys_obs = [
-        "proxy_norm_spearman_err",
-        "proxy_mah_spearman_err",
-        "proxy_norm_auc_higherr",
-        "proxy_mah_auc_higherr",
-        "proxy_norm_sparse_over_dense",
-        "proxy_mah_sparse_over_dense",
-        "proxy_norm_highspeed_over_lowspeed",
-        "proxy_mah_highspeed_over_lowspeed",
-    ]
-    if noflow is None:
-        lines.append("| Metric | Value |")
-        lines.append("|---|---:|")
-        for k in keys_obs:
-            lines.append(f"| {k} | {fmt(flow['observability_proxy'][k])} |")
-    else:
-        lines.append("| Metric | Flow | No-flow | Delta |")
-        lines.append("|---|---:|---:|---:|")
-        for k in keys_obs:
-            lines.append(
-                f"| {k} | {fmt(flow['observability_proxy'][k])} | {fmt(noflow['observability_proxy'][k])} | {fmt(flow['observability_proxy'][k]-noflow['observability_proxy'][k])} |"
-            )
-
-    lines.append("")
-    lines.append("## 5) Alignment with Physical Variables")
-    lines.append("")
-    keys_cca = ["cca_top1", "cca_top2_mean", "cca_top3_mean", "cca_top4_mean"]
-    if noflow is None:
-        lines.append("| Metric | Value |")
-        lines.append("|---|---:|")
-        for k in keys_cca:
-            lines.append(f"| {k} | {fmt(flow['physics_alignment'][k])} |")
-    else:
-        lines.append("| Metric | Flow | No-flow | Delta |")
-        lines.append("|---|---:|---:|---:|")
-        for k in keys_cca:
-            lines.append(
-                f"| {k} | {fmt(flow['physics_alignment'][k])} | {fmt(noflow['physics_alignment'][k])} | {fmt(flow['physics_alignment'][k]-noflow['physics_alignment'][k])} |"
-            )
-
-    lines.append("")
-    lines.append("## Claim-Oriented Readout")
-    lines.append("")
-    if noflow is None:
-        verdicts = _single_verdicts(flow)
-        lines.append(f"- State sufficiency: `{verdicts['state_sufficiency']}`")
-        lines.append(f"- Local linear dynamics: `{verdicts['linear_dynamics']}`")
-        lines.append(f"- Innovation-like residuals: `{verdicts['residual_whiteness']}`")
-        lines.append(f"- Observability-aware proxy: `{verdicts['observability_proxy']}`")
-        lines.append(f"- Physical alignment: `{verdicts['physics_alignment']}`")
-    else:
-        lines.append(
-            f"- If `history_gain_lag2_minus_lag0` is small, latent is closer to a sufficient state summary."
-        )
-        lines.append(
-            f"- Higher `latent_next_r2_global` and `vel_next_from_latent_r2_global` indicate more linear state transition structure."
-        )
-        lines.append(
-            f"- Lower `whiteness_index_abs_ac_lag1to5` indicates more innovation-like residuals."
-        )
-        lines.append(
-            f"- Higher AUC/Spearman for observability proxies indicates latent confidence proxy tracks error/hard regimes."
-        )
-        lines.append(
-            f"- Higher CCA indicates stronger latent alignment with physical kinematic variables."
-        )
-
-    lines.append("")
-    lines.append("## Figures")
-    lines.append("")
-    lines.append("- `plots/dashboard_single.png`")
-    lines.append("- `plots/sufficiency_lag_curve.png`")
-    lines.append("- `plots/residual_autocorr_profile.png`")
-    lines.append("- `plots/observability_roc.png`")
-    lines.append("- `plots/cca_spectrum.png`")
-    lines.append("- `plots/regime_proxy_ratios.png`")
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Inspect latent hints of classical-like behavior.")
     parser.add_argument("--flow", required=True, help="Path to flow extracted .npz")
     parser.add_argument("--noflow", default=None, help="Optional path to comparison extracted .npz")
-    parser.add_argument("--out", default="plots/classical_hints", help="Output directory")
+    parser.add_argument(
+        "--out",
+        default="analysis/outputs/latent/classical_hints",
+        help="Output directory",
+    )
     parser.add_argument("--flow-name", default="with_flow")
     parser.add_argument("--noflow-name", default="without_flow")
     parser.add_argument("--seed", type=int, default=42)
@@ -869,13 +723,11 @@ def main() -> None:
         deltas = compare_metrics(flow_metrics, noflow_metrics)
         save_json(out_dir / f"metrics_{args.noflow_name}.json", noflow_metrics)
         save_json(out_dir / "metrics_delta.json", deltas)
-        save_report(out_dir / "report.md", flow_metrics, noflow_metrics, deltas)
         generate_plots(out_dir, flow_metrics, noflow=noflow_metrics)
         print(f"Saved outputs to: {out_dir}")
         print("Key deltas:")
         print(json.dumps(deltas, indent=2))
     else:
-        save_report(out_dir / "report.md", flow_metrics, None, None)
         verdicts = _single_verdicts(flow_metrics)
         save_json(out_dir / "verdicts_single_model.json", verdicts)
         generate_plots(out_dir, flow_metrics, noflow=None)

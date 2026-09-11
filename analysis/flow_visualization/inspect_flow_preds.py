@@ -6,9 +6,9 @@ is enabled it adds predictions from `weights/evflownet/evflownet.pth` for visual
 comparison.
 
 Outputs are per-sequence GIFs in an incremented
-`sequence_flow_preds/<MODEL_NAME>*/` directory. Dataset, checkpoint, frame, and
-GIF settings are module constants rather than CLI arguments; run from the
-repository root.
+`analysis/outputs/flow/sequence_flow_preds/<MODEL_NAME>*/` directory. Dataset,
+checkpoint, frame, and GIF settings are module constants rather than CLI
+arguments; run from the repository root.
 """
 
 import sys
@@ -21,7 +21,7 @@ import torch.nn.functional as F
 from pathlib import Path
 from PIL import Image
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -192,7 +192,7 @@ MODEL_NAME = "emmnet-angles-of_20260203_135413"
 DATAPATH = Path("elope_data") / "train"
 
 # Output path
-SAVE_ROOT = Path("sequence_flow_preds")
+SAVE_ROOT = Path("analysis") / "outputs" / "flow" / "sequence_flow_preds"
 
 # Frames per sequence and stride
 MAX_FRAMES = 200
@@ -322,7 +322,7 @@ def main():
             frames_flow.append(flow_img)
 
             if evflow is not None:
-                # Build EVFlowNet input from raw events to match analysis/inspect_events.py
+                # Build EVFlowNet input from raw events to match inspect_events.py.
                 t_ref = float(tms[0, -1].item())
                 tensor_ev = build_evflownet_tensor(
                     seq_loader.full_events,

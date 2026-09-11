@@ -27,13 +27,13 @@ The repository's existing extracted latent files are supported directly, e.g.
 
 Outputs
 -------
-`--out-dir` is populated with `report.md`, CSV/Markdown tables, PNG diagnostic
-and paper figures, cached PCA/UMAP and reliability arrays, and run metadata.
+`--out-dir` is populated with CSV tables, PNG diagnostic and paper figures,
+cached PCA/UMAP and reliability arrays, and run metadata.
 The script does not modify model checkpoints or source latent files.
 
 Example
 -------
-python analysis/analyze_journal_latents.py \\
+python analysis/latent/analyze_journal_latents.py \\
   --with-flow-dir plots/latent_compare_best_3 \\
   --without-flow-dir plots/latent_compare_best_3 \\
   --out-dir plots/journal_latent_analysis \\
@@ -535,11 +535,6 @@ def error_summary(model: ModelOutputs) -> dict[str, float]:
 
 def save_table(df: pd.DataFrame, stem: str, tables_dir: Path) -> None:
     df.to_csv(tables_dir / f"{stem}.csv", index=False)
-    try:
-        md = df.to_markdown(index=False)
-    except Exception:
-        md = df.to_string(index=False)
-    (tables_dir / f"{stem}.md").write_text(md + "\n", encoding="utf-8")
 
 
 def compute_errors(a: ModelOutputs, b: ModelOutputs, tables_dir: Path) -> pd.DataFrame:
@@ -1751,104 +1746,11 @@ def plot_paper_latent_manifold(model: ModelOutputs, out_dir: Path) -> None:
     pd.DataFrame(stats_rows).to_csv(out_dir / "paper_figure_4_phase_correlations.csv", index=False)
 
 
-def write_paper_plot_interpretation(
-    out_dir: Path,
-    basic_df: pd.DataFrame,
-    slice_df: pd.DataFrame,
-    gate_df: pd.DataFrame,
-    reliability_df: pd.DataFrame,
-    navigation_df: pd.DataFrame,
-    models: list[ModelOutputs],
-) -> None:
-    with_name = models[0].name
-    without_name = models[1].name
-    wf = basic_df[basic_df["model"] == with_name].iloc[0]
-    nf = basic_df[basic_df["model"] == without_name].iloc[0]
-    gain = 100.0 * (nf["rmse"] - wf["rmse"]) / max(float(nf["rmse"]), 1e-12)
-
-    def nav_value(model: str, metric: str) -> float:
-        row = navigation_df[(navigation_df["model"] == model) & (navigation_df["metric"] == metric)]
-        return float(row["value"].iloc[0]) if len(row) else np.nan
-
-    gate_score = best_gate_score(gate_df, with_name) or "mahalanobis"
-    gate10 = gate_df[
-        (gate_df["model"] == with_name) & (gate_df["score"] == gate_score) & (gate_df["reject_percent"] == 10)
-    ]
-    gate_text = ""
-    if len(gate10):
-        g = gate10.iloc[0]
-        gate_text = (
-            f"At a 10% fallback rate, `{gate_score}` reduces retained RMSE to "
-            f"{g['retained_rmse']:.2f} and catches {100*g['high_error_recall_rejected']:.1f}% "
-            "of high-error windows."
-        )
-
-    progress = trajectory_progress(models[0])
-    speed = speed_values(models[0])
-    z = np.asarray(models[0].z, dtype=float)
-    z = z - np.nanmean(z, axis=0, keepdims=True)
-    emb = PCA(n_components=2, random_state=42).fit_transform(z)
-    phase_text = ""
-    if progress is not None:
-        mask = finite_mask(speed, progress, emb)
-        rho_speed_progress = stats.spearmanr(speed[mask], progress[mask], nan_policy="omit").correlation
-        rho_pc2_speed = stats.spearmanr(emb[mask, 1], speed[mask], nan_policy="omit").correlation
-        rho_pc2_progress = stats.spearmanr(emb[mask, 1], progress[mask], nan_policy="omit").correlation
-        phase_text = (
-            f"In this run, speed is strongly organized along PC2 (Spearman {rho_pc2_speed:.2f}), "
-            f"whereas trajectory progress is weakly related to PC2 (Spearman {rho_pc2_progress:.2f}) "
-            f"and speed is only weakly related to progress overall (Spearman {rho_speed_progress:.2f}). "
-            "Thus the visible speed gradient should not be described as only an encoding of sample order."
-        )
-
-    lines = [
-        "# Curated Paper Figure Interpretation",
-        "",
-        "These four figures are intended as the paper-facing subset. The remaining figures and tables are diagnostic support material.",
-        "",
-        "## Figure 1 - Robustness Summary",
-        "",
-        "**Critical evaluation.** This is the cleanest plot for demonstrating practical estimation gain. It compares velocity RMSE in regimes that matter to navigation: sparse events, high speed, high lateral speed, vertical motion, and high angular excitation when available.",
-        "",
-        f"**Interpretation.** The with-flow model reduces global RMSE from {nf['rmse']:.2f} to {wf['rmse']:.2f}, a {gain:.1f}% relative improvement. The important point is not only the average gain, but whether the gain persists in hard regimes. If the sparse-event/high-speed bars remain lower for with-flow, the auxiliary task is improving motion evidence where event-based navigation is most fragile.",
-        "",
-        "**Caveat.** Slices are quantile-defined on this evaluation set. They are operationally useful stress tests, but not universal flight-envelope thresholds.",
-        "",
-        "## Figure 2 - Latent-Derived Navigation Gate",
-        "",
-        "**Critical evaluation.** This figure answers whether the latent can drive a fallback policy. The left panel shows the accuracy retained after routing the riskiest windows away from the learned estimator. The right panel shows whether those rejected windows actually contain high-error cases.",
-        "",
-        f"**Interpretation.** {gate_text} A useful navigation monitor should reduce retained RMSE without rejecting arbitrary samples. Mahalanobis distance is especially interpretable here because it measures how far a window lies from the learned latent distribution.",
-        "",
-        "**Caveat.** This is not calibrated uncertainty. It is a ranking signal for fallback, covariance inflation, or conservative control.",
-        "",
-        "## Figure 3 - Risk Calibration By Latent Distance",
-        "",
-        "**Critical evaluation.** This plot checks monotonicity: as latent Mahalanobis distance increases, prediction error should rise. That is the key property needed for a practical risk monitor.",
-        "",
-        "**Interpretation.** A rising curve means latent geometry contains reliability information, not just task information. The interquartile band is important: wide bands indicate that the score is useful statistically but not deterministic at the single-sample level.",
-        "",
-        "**Caveat.** If high deciles flatten or become noisy, the latent score should be used only as one cue together with event density, IMU excitation, and classical residual checks.",
-        "",
-        "## Figure 4 - Compact Latent Manifold With Failure Overlay",
-        "",
-        "**Critical evaluation.** This is the best visual explanation of the latent as a navigation state. It now compares the same PCA manifold colored by physical speed and by normalized within-trajectory progress, so it directly checks whether the speed structure is merely a trajectory-phase artifact.",
-        "",
-        f"**Interpretation.** The with-flow latent is compact: `pca_dim_95={nav_value(with_name, 'pca_dim_95'):.0f}` and participation ratio `{nav_value(with_name, 'participation_ratio'):.2f}` in the summary table. A coherent speed gradient supports using the latent as a compact state-like representation. {phase_text} Red high-error rings reveal where the learned state is less reliable.",
-        "",
-        "**Caveat.** PCA is a 2D projection and speed is itself physically correlated with landing phase in some trajectories. Use the side-by-side progress panel and `paper_figure_4_phase_correlations.csv` to avoid over-claiming that the network has learned speed independently of trajectory phase.",
-        "",
-    ]
-    (out_dir / "paper_plot_interpretation.md").write_text("\n".join(lines), encoding="utf-8")
-
-
 def curated_paper_plots(
     models: list[ModelOutputs],
-    basic_df: pd.DataFrame,
     slice_df: pd.DataFrame,
     gate_df: pd.DataFrame,
     reliability_df: pd.DataFrame,
-    navigation_df: pd.DataFrame,
     out_dir: Path,
 ) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1856,185 +1758,6 @@ def curated_paper_plots(
     plot_paper_navigation_gate(gate_df, models, out_dir)
     plot_paper_risk_calibration(reliability_df, models, out_dir)
     plot_paper_latent_manifold(models[0], out_dir)
-    write_paper_plot_interpretation(out_dir, basic_df, slice_df, gate_df, reliability_df, navigation_df, models)
-
-
-def strongest_gain_table(slice_df: pd.DataFrame, with_name: str, without_name: str) -> pd.DataFrame:
-    pivot = slice_df.pivot(index="slice", columns="model", values="rmse").dropna()
-    if with_name not in pivot or without_name not in pivot:
-        return pd.DataFrame()
-    out = pivot.reset_index()
-    out["rmse_delta_with_minus_without"] = out[with_name] - out[without_name]
-    out["relative_gain_percent"] = 100.0 * (out[without_name] - out[with_name]) / np.maximum(out[without_name], 1e-12)
-    return out.sort_values("rmse_delta_with_minus_without")
-
-
-def write_report(
-    out_dir: Path,
-    basic_df: pd.DataFrame,
-    slice_df: pd.DataFrame,
-    reject_df: pd.DataFrame,
-    high_df: pd.DataFrame,
-    attention_df: pd.DataFrame,
-    physical_df: pd.DataFrame,
-    temporal_df: pd.DataFrame,
-    gate_df: pd.DataFrame,
-    navigation_df: pd.DataFrame,
-    align_mode: str,
-    models: list[ModelOutputs],
-) -> None:
-    with_name = models[0].name
-    without_name = models[1].name
-    lines = ["# Journal Latent Analysis Report", ""]
-    lines.append(f"- Alignment mode: `{align_mode}`")
-    lines.append(f"- Aligned samples: `{len(models[0].z)}`")
-    lines.append("- Curated paper figures: `figures_paper/`")
-    lines.append("- Curated interpretation notes: `figures_paper/paper_plot_interpretation.md`")
-    lines.append("")
-
-    wf = basic_df[basic_df["model"] == with_name].iloc[0]
-    nf = basic_df[basic_df["model"] == without_name].iloc[0]
-    gain = 100.0 * (nf["rmse"] - wf["rmse"]) / max(float(nf["rmse"]), 1e-12)
-    lines += [
-        "## Key Performance Change",
-        "",
-        f"- `{with_name}` RMSE: `{wf['rmse']:.6f}`",
-        f"- `{without_name}` RMSE: `{nf['rmse']:.6f}`",
-        f"- Relative RMSE improvement: `{gain:.2f}%`",
-        "",
-    ]
-
-    lines += ["## Navigation-Pipeline Use Of The Latent Space", ""]
-    if len(navigation_df):
-        for model_name in navigation_df["model"].drop_duplicates():
-            lines.append(f"### {model_name}")
-            sub = navigation_df[navigation_df["model"] == model_name]
-            for metric in [
-                "pca_dim_95",
-                "ridge_z_to_velocity_r2",
-                "cca_top1_z_vs_velocity_speed",
-                "best_high_error_roc_auc",
-                "best_score_reject10_high_error_recall",
-                "best_score_reject10_retained_rmse",
-                "mean_latent_smoothness",
-            ]:
-                row = sub[sub["metric"] == metric]
-                if len(row):
-                    val = row["value"].iloc[0]
-                    if np.isfinite(val):
-                        lines.append(f"- `{metric}`: `{val:.4f}`")
-            lines.append("")
-        lines.append(
-            "Interpretation: these metrics assess whether the latent can serve as a compact navigation state, "
-            "a lightweight readout interface, and a risk monitor for fallback/rejection policies. They do not "
-            "turn the network into a formally calibrated estimator."
-        )
-    else:
-        lines.append("- Navigation readiness summary unavailable.")
-    lines.append("")
-
-    gains = strongest_gain_table(slice_df, with_name, without_name)
-    lines += ["## Strongest Robustness Gains", ""]
-    if len(gains):
-        for _, row in gains.head(5).iterrows():
-            lines.append(
-                f"- `{row['slice']}`: delta `{row['rmse_delta_with_minus_without']:.4f}`, "
-                f"relative gain `{row['relative_gain_percent']:.2f}%`"
-            )
-    else:
-        lines.append("- Slice comparison unavailable.")
-    lines.append("")
-
-    lines += ["## Reject-option Reliability", ""]
-    if len(reject_df):
-        for model_name in reject_df["model"].drop_duplicates():
-            sub = reject_df[(reject_df["model"] == model_name) & (reject_df["score"] == "mahalanobis")]
-            if len(sub):
-                r0 = sub[sub["reject_percent"] == 0]["retained_rmse"].iloc[0]
-                r10 = sub[sub["reject_percent"] == 10]["retained_rmse"].iloc[0]
-                lines.append(f"- `{model_name}` Mahalanobis reject 10%: RMSE `{r0:.4f}` -> `{r10:.4f}`")
-    else:
-        lines.append("- Reject-option table unavailable.")
-    lines.append("")
-
-    lines += ["## Operational Gate / Fallback Policy", ""]
-    if len(gate_df):
-        for model_name in gate_df["model"].drop_duplicates():
-            sub = gate_df[(gate_df["model"] == model_name) & (gate_df["reject_percent"] == 10)]
-            if len(sub):
-                best = sub.sort_values("high_error_recall_rejected", ascending=False).iloc[0]
-                lines.append(
-                    f"- `{model_name}` best 10% gate uses `{best['score']}`: "
-                    f"high-error recall `{best['high_error_recall_rejected']:.3f}`, "
-                    f"rejection precision `{best['rejection_precision_high_error']:.3f}`, "
-                    f"retained RMSE `{best['retained_rmse']:.4f}`."
-                )
-        lines.append(
-            "- Use this table to choose when a navigation stack should fall back to a classical estimator, "
-            "increase uncertainty, or request conservative control."
-        )
-    else:
-        lines.append("- Operational gate table unavailable.")
-    lines.append("")
-
-    lines += ["## High-error Detection", ""]
-    if len(high_df):
-        best = high_df.sort_values("roc_auc", ascending=False).groupby("model").head(3)
-        for _, row in best.iterrows():
-            lines.append(
-                f"- `{row['model']}` `{row['score']}`: ROC AUC `{row['roc_auc']:.3f}`, "
-                f"PR AUC `{row['pr_auc']:.3f}`, Spearman `{row['spearman_error']:.3f}`"
-            )
-    else:
-        lines.append("- High-error detection unavailable.")
-    lines.append("")
-
-    lines += ["## Attention Correlations", ""]
-    if len(attention_df):
-        top_att = attention_df.reindex(attention_df["spearman"].abs().sort_values(ascending=False).index).head(8)
-        for _, row in top_att.iterrows():
-            lines.append(
-                f"- `{row['model']}` attention `{row['attention_group']}` vs `{row['context']}`: "
-                f"Spearman `{row['spearman']:.3f}`"
-            )
-    else:
-        lines.append("- Attention arrays missing or incompatible; attention analysis skipped.")
-    lines.append("")
-
-    lines += ["## Latent Geometry And Physical Alignment", ""]
-    if len(physical_df):
-        probe = physical_df[
-            (physical_df["analysis"] == "ridge_probe")
-            & (physical_df["target"] == "velocity")
-            & (physical_df["metric"] == "r2")
-        ]
-        for _, row in probe.iterrows():
-            lines.append(f"- `{row['model']}` latent-to-velocity ridge probe R2: `{row['value']:.4f}`")
-    lines.append("- PCA/UMAP figures are saved under `figures/`.")
-    lines.append("")
-
-    lines += ["## Temporal Diagnostics", ""]
-    if len(temporal_df):
-        lines.append("- Temporal-contiguous diagnostics were computed from sequence IDs and timestamps.")
-    else:
-        lines.append(
-            "- Temporal diagnostics were skipped or empty. Sequence IDs and ordered timestamps are required "
-            "for claims about latent trajectory smoothness, transition probes, and residual autocorrelation."
-        )
-    lines.append("")
-
-    lines += [
-        "## Scientific Claim Checklist",
-        "",
-        "1. Flow self-supervision improves final velocity RMSE, especially in hard regimes: see `basic_performance` and `robustness_slices`.",
-        "2. Structured latent space can be used pragmatically in navigation: see `navigation_readiness_summary` and `navigation_gate_policy`.",
-        "3. Flow supervision reshapes latent geometry: see PCA/UMAP and physical-alignment outputs.",
-        "4. Latent distances as reliability indicators: see `reject_option`, `high_error_detection`, and `navigation_gate_policy`.",
-        "5. Context-dependent modality reliance: see `attention_correlations` and attention-vs-context plots.",
-        "6. State-estimator-like behavior: see physical alignment and temporal diagnostics; avoid formal uncertainty claims.",
-        "",
-    ]
-    (out_dir / "report.md").write_text("\n".join(lines), encoding="utf-8")
 
 
 def main() -> None:
@@ -2075,7 +1798,7 @@ def main() -> None:
 
     basic_df = compute_errors(with_flow, without_flow, dirs["tables"])
     slice_df = compute_slices(models, dirs["tables"], dirs["figures"])
-    reject_df = reject_option_analysis(models, dirs["tables"], dirs["figures"], dirs["arrays"])
+    reject_option_analysis(models, dirs["tables"], dirs["figures"], dirs["arrays"])
     high_df = high_error_detection(
         models,
         args.high_error_quantile,
@@ -2085,7 +1808,7 @@ def main() -> None:
         dirs["figures"],
     )
     reliability_df = reliability_curves(models, dirs["tables"], dirs["figures"])
-    attention_df = attention_analysis(models, dirs["tables"], dirs["figures"])
+    attention_analysis(models, dirs["tables"], dirs["figures"])
     physical_df = physical_alignment(models, dirs["tables"], dirs["figures"], args.random_seed)
     temporal_df = temporal_diagnostics(
         models, dirs["tables"], dirs["figures"], args.random_seed, args.temporal_only
@@ -2093,17 +1816,15 @@ def main() -> None:
     gate_df = navigation_gate_analysis(
         models, args.high_error_quantile, dirs["tables"], dirs["figures"]
     )
-    navigation_df = navigation_readiness_summary(
+    navigation_readiness_summary(
         models, basic_df, high_df, physical_df, temporal_df, gate_df, dirs["tables"]
     )
     manifold_plots(models, dirs["figures"], dirs["arrays"], args.make_umap, args.random_seed)
     curated_paper_plots(
         models,
-        basic_df,
         slice_df,
         gate_df,
         reliability_df,
-        navigation_df,
         dirs["figures_paper"],
     )
 
@@ -2123,20 +1844,6 @@ def main() -> None:
     }
     (dirs["arrays"] / "run_metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
-    write_report(
-        dirs["root"],
-        basic_df,
-        slice_df,
-        reject_df,
-        high_df,
-        attention_df,
-        physical_df,
-        temporal_df,
-        gate_df,
-        navigation_df,
-        align_mode,
-        models,
-    )
     print(f"Saved journal latent analysis to: {args.out_dir}")
 
 
