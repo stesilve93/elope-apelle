@@ -36,6 +36,8 @@ import math
 import os
 import tempfile
 import warnings
+
+SHOW_FIGURE_TITLES = True
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -124,7 +126,7 @@ class ModelOutputs:
         )
 
 
-def setup_style() -> None:
+def setup_style(font_size: float = 10) -> None:
     plt.rcParams.update(
         {
             "figure.dpi": 130,
@@ -133,9 +135,13 @@ def setup_style() -> None:
             "grid.alpha": 0.28,
             "axes.spines.top": False,
             "axes.spines.right": False,
-            "font.size": 10,
-            "axes.titlesize": 11,
-            "axes.labelsize": 10,
+            "font.size": font_size,
+            "axes.titlesize": font_size + 2,
+            "axes.labelsize": font_size,
+            "xtick.labelsize": max(font_size - 2, 1),
+            "ytick.labelsize": max(font_size - 2, 1),
+            "legend.fontsize": max(font_size - 2, 1),
+            "legend.title_fontsize": max(font_size - 1, 1),
             "legend.frameon": False,
         }
     )
@@ -1602,8 +1608,9 @@ def plot_paper_navigation_gate(gate_df: pd.DataFrame, models: list[ModelOutputs]
     axes[0].set_title("Accuracy after risk gating")
     axes[1].set_title("High-error windows caught")
     axes[1].set_ylim(0, 1)
-    axes[0].legend(fontsize=8)
-    fig.suptitle("Latent-derived gate for fallback navigation", y=0.99)
+    axes[0].legend()
+    if SHOW_FIGURE_TITLES:
+        fig.suptitle("Latent-derived gate for fallback navigation", y=0.99)
     fig.tight_layout()
     fig.savefig(out_dir / "paper_figure_2_navigation_gate.png")
     plt.close(fig)
@@ -1647,7 +1654,8 @@ def plot_paper_risk_calibration(reliability_df: pd.DataFrame, models: list[Model
         ax.fill_between(x, q25, q75, color=color, alpha=0.15)
     ax.set_xlabel("Mahalanobis risk decile")
     ax.set_ylabel("Velocity error")
-    ax.set_title("Latent distance behaves as a risk indicator")
+    if SHOW_FIGURE_TITLES:
+        ax.set_title("Latent distance behaves as a risk indicator")
     ax.legend()
     ax.grid(alpha=0.25)
     fig.tight_layout()
@@ -1683,15 +1691,20 @@ def plot_paper_latent_manifold(model: ModelOutputs, out_dir: Path) -> None:
                 linewidths=0.75,
                 label="Top 10% error",
             )
-            ax.legend(loc="best", fontsize=8)
+            # Keep the high-error key outside the data region: the manifold
+            # branches occupy nearly the full first panel.
+            handles, labels = ax.get_legend_handles_labels()
         ax.set_xlabel("PC1")
         ax.set_title(label)
         ax.grid(alpha=0.20)
         cb = fig.colorbar(sc, ax=ax)
         cb.set_label(label)
     axes[0].set_ylabel("PC2")
-    fig.suptitle(f"Latent manifold: speed structure versus trajectory phase ({label_model(model.name)})", y=.99)
-    fig.tight_layout()
+    if SHOW_FIGURE_TITLES:
+        fig.suptitle(f"Latent manifold: speed structure versus trajectory phase ({label_model(model.name)})", y=.99)
+    if high.any() and handles:
+        fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.97), ncol=1)
+    fig.tight_layout(rect=(0, 0, 1, 0.91))
     fig.savefig(out_dir / "paper_figure_4_latent_manifold.png")
     plt.close(fig)
 
@@ -2013,6 +2026,7 @@ def write_report(
 
 
 def main() -> None:
+    global SHOW_FIGURE_TITLES
     parser = argparse.ArgumentParser(description="Journal latent/reliability analysis for ELOPE models.")
     parser.add_argument("--with-flow-dir", required=True, type=Path)
     parser.add_argument("--without-flow-dir", required=True, type=Path)
@@ -2022,9 +2036,12 @@ def main() -> None:
     parser.add_argument("--random-seed", type=int, default=42)
     parser.add_argument("--make-umap", action="store_true")
     parser.add_argument("--temporal-only", action="store_true")
+    parser.add_argument("--font-size", type=float, default=10, help="Base font size for generated figures")
+    parser.add_argument("--no-figure-titles", action="store_true", help="Omit figure-level titles intended to be supplied by manuscript captions")
     args = parser.parse_args()
+    SHOW_FIGURE_TITLES = not args.no_figure_titles
 
-    setup_style()
+    setup_style(args.font_size)
     np.random.seed(args.random_seed)
     dirs = ensure_dirs(args.out_dir)
 

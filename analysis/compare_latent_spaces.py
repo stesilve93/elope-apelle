@@ -35,9 +35,10 @@ except Exception:  # pragma: no cover
 
 
 EPS = 1e-12
+SHOW_FIGURE_TITLES = True
 
 
-def _setup_plot_style() -> None:
+def _setup_plot_style(font_size: float = 11) -> None:
     if not HAS_MATPLOTLIB:
         return
     plt.rcParams.update(
@@ -47,8 +48,10 @@ def _setup_plot_style() -> None:
             "axes.edgecolor": "#334155",
             "axes.labelcolor": "#0f172a",
             "axes.titleweight": "bold",
-            "axes.titlesize": 13,
-            "axes.labelsize": 11,
+            "axes.titlesize": font_size + 2,
+            "axes.labelsize": font_size,
+            "xtick.labelsize": max(font_size - 2, 1),
+            "ytick.labelsize": max(font_size - 2, 1),
             "xtick.color": "#334155",
             "ytick.color": "#334155",
             "grid.color": "#cbd5e1",
@@ -56,7 +59,9 @@ def _setup_plot_style() -> None:
             "legend.frameon": True,
             "legend.facecolor": "#ffffff",
             "legend.edgecolor": "#cbd5e1",
-            "font.size": 11,
+            "font.size": font_size,
+            "legend.fontsize": max(font_size - 2, 1),
+            "legend.title_fontsize": max(font_size - 1, 1),
         }
     )
 
@@ -321,6 +326,10 @@ def extract_latents_from_model(
         sid_i = int(sid) if str(sid).isdigit() else -1
         seq_id_map.extend([sid_i] * int(slen))
     seq_id_map = np.asarray(seq_id_map, dtype=np.int32)
+    # Keep the trajectory timestamp for analysis/provenance. The `times`
+    # returned by __getitem__ are normalized within each input window and are
+    # therefore not suitable as sample timestamps.
+    absolute_time_map = np.asarray([float(sample[0]) for sample in dataset.samples], dtype=np.float32)
 
     model = build_model(model_cfg, dataset_cfg, device=device)
     state = torch.load(str(weights_path), map_location=device)
@@ -363,8 +372,9 @@ def extract_latents_from_model(
             bsz = int(events.shape[0])
             if cursor + bsz <= len(seq_id_map):
                 seq_id_l.append(seq_id_map[cursor:cursor + bsz])
+                times_l.append(absolute_time_map[cursor:cursor + bsz])
             else:
-                seq_id_l.append(np.full(bsz, -1, dtype=np.int32))
+                raise RuntimeError("Inference loader produced more rows than its dataset index map.")
             cursor += bsz
 
             layer_cache.clear()
@@ -389,12 +399,17 @@ def extract_latents_from_model(
             pred_l.append(pred.detach().cpu().numpy())
             tvel_l.append(tvel.detach().cpu().numpy())
             tpos_l.append(tpos.detach().cpu().numpy())
-            times_l.append(tms_sel.detach().cpu().numpy().reshape(-1))
 
             att = outputs.get("attention_weights", None)
             att_l.append(att.detach().cpu().numpy() if torch.is_tensor(att) else None)
 
-            event_tokens = torch.tensor([events.shape[-3] if events.ndim >= 6 else -1] * events.shape[0])
+            if torch.is_tensor(att) and att.ndim >= 3:
+                # Cross-modal attention has event tokens followed by the three
+                # IMU/range/attitude tokens.
+                n_event_tokens = int(att.shape[-1] - 3)
+            else:
+                n_event_tokens = int(events.shape[-3]) if events.ndim >= 6 else -1
+            event_tokens = torch.tensor([n_event_tokens] * events.shape[0])
             total_tokens = event_tokens + 3
             etok_l.append(event_tokens.numpy())
             ttok_l.append(total_tokens.numpy())
@@ -512,7 +527,8 @@ def align_packs(pack_a: LatentPack, pack_b: LatentPack, decimals: int = 4) -> tu
         "mode": "key_match",
     }
 
-    if len(idx_a) < max(200, int(0.4 * min(len(keys_a), len(keys_b)))):
+    min_matches = min(200, max(1, int(0.4 * min(len(keys_a), len(keys_b)))))
+    if len(idx_a) < min_matches:
         n = min(len(keys_a), len(keys_b))
         idx_a = np.arange(n)
         idx_b = np.arange(n)
@@ -1176,7 +1192,8 @@ def _plot_robustness_slices(
     plt.bar(x + w / 2, vals_b, width=w, label=name_b, color="#b45309")
     plt.xticks(x, common, rotation=30, ha="right")
     plt.ylabel("Velocity RMSE")
-    plt.title("Robustness by motion/data slice")
+    if SHOW_FIGURE_TITLES:
+        plt.title("Robustness by motion/data slice")
     plt.grid(True, axis="y", linestyle=":", linewidth=0.7)
     plt.legend()
     plt.savefig(out_path, dpi=220)
@@ -1625,6 +1642,7 @@ def _build_pack(
 
 
 def main() -> None:
+    global SHOW_FIGURE_TITLES
     parser = argparse.ArgumentParser(
         description="Compare latent spaces between flow-head and no-flow models."
     )
@@ -1637,6 +1655,8 @@ def main() -> None:
     parser.add_argument("--max-batches", type=int, default=None)
     parser.add_argument("--max-samples", type=int, default=None, help="Cap aligned samples for analysis")
     parser.add_argument("--max-corr-dims", type=int, default=128)
+    parser.add_argument("--font-size", type=float, default=11, help="Base font size for generated figures")
+    parser.add_argument("--no-figure-titles", action="store_true", help="Omit figure-level titles intended to be supplied by manuscript captions")
 
     parser.add_argument("--flow-name", default="with_flow")
     parser.add_argument("--noflow-name", default="without_flow")
@@ -1655,6 +1675,7 @@ def main() -> None:
     parser.add_argument("--noflow-weights", default=None)
 
     args = parser.parse_args()
+    SHOW_FIGURE_TITLES = not args.no_figure_titles
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     plots_dir = out_dir / "plots"
@@ -1662,7 +1683,7 @@ def main() -> None:
     if not HAS_MATPLOTLIB:
         warnings.warn("matplotlib not available: figures will be skipped, metrics/report will still be generated.")
     else:
-        _setup_plot_style()
+        _setup_plot_style(args.font_size)
 
     device = torch.device(args.device) if args.device is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
     sequences = parse_sequences(args.sequences)
