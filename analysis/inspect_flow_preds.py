@@ -1,3 +1,16 @@
+"""Create sequence GIFs comparing learned and reference optical-flow outputs.
+
+The script loads the ELOPE checkpoint named by `MODEL_NAME`, renders positive and
+negative event frames, and visualizes the model's flow head. When `USE_EVFLOWNET`
+is enabled it adds predictions from `weights/evflownet/evflownet.pth` for visual
+comparison.
+
+Outputs are per-sequence GIFs in an incremented
+`sequence_flow_preds/<MODEL_NAME>*/` directory. Dataset, checkpoint, frame, and
+GIF settings are module constants rather than CLI arguments; run from the
+repository root.
+"""
+
 import sys
 
 import cv2

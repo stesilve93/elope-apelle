@@ -1,4 +1,15 @@
 
+"""Run a hard-coded EVFlowNet smoke test on training sequence 0023.
+
+This exploratory script loads `weights/evflownet/evflownet.pth`, converts the
+sequence's event tensors to EVFlowNet inputs, runs optical-flow inference, and
+compares the flow color rendering with the positive timestamp surface.
+
+It writes `testflow_0023.gif` and `test.png` in the repository root. There is no
+CLI, and importing the module executes inference immediately. Edit the constants
+below to change the checkpoint, sequence, or event encoding.
+"""
+
 import sys
 
 import cv2 

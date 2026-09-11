@@ -10,6 +10,10 @@ The figure shows one model input/output pair:
 5. sparse flow vectors overlaid on the event tensor,
 6. velocity/context annotations.
 
+The script loads a saved ELOPE model and one sample from the selected dataset
+split/sequence. It writes a single PNG to `--out` (creating parent directories)
+and does not alter the checkpoint or dataset.
+
 Example
 -------
 python analysis/visualize_event_flow_pipeline.py \\

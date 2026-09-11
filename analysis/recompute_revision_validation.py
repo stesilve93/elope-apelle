@@ -4,6 +4,15 @@
 The trained checkpoints, dataset representation, event window, and trajectory
 split are fixed.  Diagnostic transforms are fitted on trajectories 0000--0027
 excluding 0004 and are evaluated on the original validation trajectory 0004.
+
+By default the script re-extracts train/validation latent packs for the fixed
+with-flow and without-flow checkpoints; `--reuse-artifacts` validates and reuses
+existing packs. It then computes held-out probes, reliability, representation
+similarity, attention, and latent-space metrics.
+
+Extracted packs are stored in `analysis/revision_latents/`. CSV tables, PNG/PDF
+figures, and `summary.md` are written under
+`analysis/revision_validation_analysis/`. Source checkpoints are not modified.
 """
 
 from __future__ import annotations

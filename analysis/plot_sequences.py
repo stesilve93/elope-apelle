@@ -1,4 +1,15 @@
 
+"""Plot raw trajectory, IMU, range, and timing information for all sequences.
+
+This legacy, fixed-configuration script reads the train/test datasets under
+`elope_data/` using dataset settings from `MODEL_PATH`. It visualizes IMU and
+range signals for every sequence, plus position/velocity targets for train data.
+
+Plots are written to `plots/sequences/<split>/<sequence>/` as `imu.png`,
+`rangemeter.png`, and (for train sequences) `trajectory.png`; a timestep table is
+printed to stdout. There is no CLI, and importing the module executes the job.
+"""
+
 import sys
 
 import matplotlib.pyplot as plt 

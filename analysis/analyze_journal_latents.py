@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Journal-ready latent, reliability, attention, and robustness analysis.
+"""Generate journal-ready latent, reliability, attention, and robustness results.
+
+Purpose
+-------
+Compare with-flow and without-flow model outputs, quantify prediction quality and
+latent-space structure, and evaluate whether latent/attention signals are useful
+for error detection, rejection, and navigation gating.
 
 Expected input format
 ---------------------
@@ -18,6 +24,12 @@ optional PyTorch `.pt/.pth` files with arrays using any of these common names:
 The repository's existing extracted latent files are supported directly, e.g.
 `extracted_with_flow_best.npz` with keys `fused`, `pred`, `target_vel`, `times`,
 `event_density`, `attention`, and `sequence_id`.
+
+Outputs
+-------
+`--out-dir` is populated with `report.md`, CSV/Markdown tables, PNG diagnostic
+and paper figures, cached PCA/UMAP and reliability arrays, and run metadata.
+The script does not modify model checkpoints or source latent files.
 
 Example
 -------

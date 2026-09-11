@@ -1,4 +1,15 @@
 
+"""Render dataset event windows, optionally alongside EVFlowNet predictions.
+
+This legacy, fixed-configuration script reads training sequences 0000--0027,
+bins their raw events, builds count/timestamp surfaces, and optionally runs the
+checkpoint at `weights/evflownet/evflownet.pth` to visualize optical flow.
+
+It creates one animated GIF per sequence under `sequence_events/`. Configuration
+is set by the module constants below, there is no CLI, and importing the module
+executes the full rendering job; run it from the repository root.
+"""
+
 import sys
 
 import cv2

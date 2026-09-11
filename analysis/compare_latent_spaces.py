@@ -1,3 +1,16 @@
+"""Extract, analyze, and compare latent spaces from two ELOPE models.
+
+Inputs may be existing extracted latent `.npz` files/directories or two saved
+model directories (configuration plus weights), in which case this script runs
+inference and caches aligned latent packs. It compares prediction error,
+representation geometry, linear probes, attention, event density, and temporal
+behavior for a with-flow and a without-flow model.
+
+The `--out` directory receives extracted `.npz` packs when inference is needed,
+JSON metrics and alignment statistics, `report.md`, and a `plots/` directory of
+comparison figures. Run from the repository root; see `--help` for input modes.
+"""
+
 import argparse
 import json
 import math

@@ -1,3 +1,15 @@
+"""Create static and interactive visualizations of an extracted latent manifold.
+
+The required `--npz` pack supplies fused latents, predictions, velocity/position
+targets, timestamps, sequence IDs, and event density. Samples can be filtered by
+trajectory and embedded with PCA, t-SNE, or UMAP (with dependency-aware fallback
+behavior).
+
+The `--out` directory receives 2D/3D PNG projections colored by speed, prediction
+error, and event density; density landscapes; trajectory plots; and
+`summary.json`. With `--interactive`, it also writes two Plotly HTML views.
+"""
+
 import argparse
 import json
 import warnings

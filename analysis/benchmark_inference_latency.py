@@ -1,5 +1,12 @@
 """Benchmark batch-1 inference latency for a saved EMMNet model.
 
+The script loads `model-cfg.yml`, `dataset-cfg.yml`, and `best.pth` from the
+selected model directory, creates synthetic inputs with the configured shapes,
+and times warmed-up inference on each requested CPU/CUDA device.
+
+Output is written only to stdout: a Markdown table plus a LaTeX-ready summary
+sentence. No benchmark files or model artifacts are created or changed.
+
 Run from the repository root, for example:
 
 python analysis/benchmark_inference_latency.py \

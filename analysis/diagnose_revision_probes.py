@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""Diagnose trajectory-wise calibration of the frozen revision ridge probes."""
+"""Diagnose trajectory-wise calibration of the frozen revision ridge probes.
+
+This fixed-configuration follow-up loads the with-flow and without-flow train and
+validation packs from `analysis/revision_latents/`, fits velocity ridge probes on
+the train split only, and measures component- and trajectory-level calibration.
+
+It writes CSV metrics, a Markdown diagnostic, and three PNG plots to
+`analysis/revision_validation_analysis/probe_diagnostic/`. There is no CLI;
+paths, model labels, and output names are constants below.
+"""
 
 from __future__ import annotations
 

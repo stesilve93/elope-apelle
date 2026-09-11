@@ -1,3 +1,15 @@
+"""Probe extracted latents for signals resembling classical navigation cues.
+
+The required `--flow` `.npz` pack (and optional `--noflow` comparison pack) must
+contain fused latents, predictions, velocity/position targets, event density,
+and sequence IDs. The analysis tests linear decodability and relationships with
+motion, error, event density, and trajectory structure.
+
+The `--out` directory receives per-model JSON metrics, a Markdown report, PNG
+plots, and either comparison deltas or single-model verdicts. Source packs are
+read-only. Run from the repository root and use `--help` for options.
+"""
+
 import argparse
 import json
 from dataclasses import dataclass
