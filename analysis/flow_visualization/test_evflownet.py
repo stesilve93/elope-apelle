@@ -1,4 +1,16 @@
 
+"""Run a hard-coded EVFlowNet smoke test on training sequence 0023.
+
+This exploratory script loads `weights/evflownet/evflownet.pth`, converts the
+sequence's event tensors to EVFlowNet inputs, runs optical-flow inference, and
+compares the flow color rendering with the positive timestamp surface.
+
+It writes `testflow_0023.gif` and `test.png` under
+`analysis/outputs/flow/evflownet_smoke_test/`. There is no CLI, and importing the
+module executes inference immediately. Edit the constants below to change the
+checkpoint, sequence, or event encoding.
+"""
+
 import sys
 
 import cv2 
@@ -8,7 +20,7 @@ import torch.nn.functional as F
 
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -160,7 +172,16 @@ def stack_frames(frames1, frames2, savepath, **kwargs):
         **kwargs
     )
 
-stack_frames(frames_flow, frames_stamp, "testflow_0023.gif", duration=1, loop=0)
+OUTPUT_DIR = Path("analysis") / "outputs" / "flow" / "evflownet_smoke_test"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+stack_frames(
+    frames_flow,
+    frames_stamp,
+    OUTPUT_DIR / "testflow_0023.gif",
+    duration=1,
+    loop=0,
+)
     
 # frames_flow[0].save(
 #     f"test_flow_0023.gif", 
@@ -197,4 +218,4 @@ stack_frames(frames_flow, frames_stamp, "testflow_0023.gif", duration=1, loop=0)
 import flow_vis
 flow_color = flow_vis.flow_to_color(flow, convert_to_bgr=False)
 
-cv2.imwrite("test.png", flow_color)
+cv2.imwrite(str(OUTPUT_DIR / "test.png"), flow_color)

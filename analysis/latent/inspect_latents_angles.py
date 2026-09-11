@@ -1,3 +1,15 @@
+"""Inspect velocity information and attention patterns in extracted latents.
+
+`--path` accepts one latent `.npz` file or a directory of packs containing
+`fused`, `pred`, `target_vel`, `target_pos`, and `times`, with optional attention
+and token-count arrays. The script fits a simple held-out velocity probe, maps
+the latent space with PCA, and computes target/latent correlations.
+
+It writes `latent_metrics.txt`, PCA and correlation PNGs, and—when attention is
+available—`attention_heatmap.png` to `--out` (or beside the input by default).
+Summary metrics are also printed to stdout.
+"""
+
 import argparse
 from pathlib import Path
 

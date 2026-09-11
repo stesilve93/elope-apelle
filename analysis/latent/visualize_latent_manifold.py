@@ -1,6 +1,20 @@
+"""Create static and interactive visualizations of an extracted latent manifold.
+
+The required `--npz` pack supplies fused latents, predictions, velocity/position
+targets, timestamps, sequence IDs, and event density. Samples can be filtered by
+trajectory and embedded with PCA, t-SNE, or UMAP (with dependency-aware fallback
+behavior).
+
+The `--out` directory receives 2D/3D PNG projections colored by speed, prediction
+error, and event density; density landscapes; trajectory plots; and
+`summary.json`. With `--interactive`, it also writes two Plotly HTML views.
+"""
+
 import argparse
 import json
 import warnings
+
+SHOW_FIGURE_TITLES = True
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,23 +68,27 @@ class LatentData:
     event_density: np.ndarray
 
 
-def _setup_style() -> None:
+def _setup_style(font_size: float = 11) -> None:
     if not HAS_MPL:
         return
     plt.rcParams.update(
         {
-            "figure.dpi": 120,
+            "figure.dpi": 300,
             "axes.facecolor": "#f8fafc",
             "axes.edgecolor": "#334155",
             "axes.labelcolor": "#0f172a",
             "axes.titleweight": "bold",
-            "axes.titlesize": 13,
-            "axes.labelsize": 11,
+            "axes.titlesize": font_size + 2,
+            "axes.labelsize": font_size,
+            "xtick.labelsize": max(font_size - 2, 1),
+            "ytick.labelsize": max(font_size - 2, 1),
             "xtick.color": "#334155",
             "ytick.color": "#334155",
             "grid.color": "#cbd5e1",
             "grid.alpha": 0.6,
-            "font.size": 11,
+            "font.size": font_size,
+            "legend.fontsize": max(font_size - 2, 1),
+            "legend.title_fontsize": max(font_size - 1, 1),
             "legend.frameon": True,
             "legend.facecolor": "#ffffff",
             "legend.edgecolor": "#cbd5e1",
@@ -280,7 +298,8 @@ def _continuous_scatter_2d(
     im = ax.scatter(Z[:, 0], Z[:, 1], c=c, s=8, cmap=cmap, alpha=0.78, linewidths=0)
     ax.set_xlabel("Component 1")
     ax.set_ylabel("Component 2")
-    ax.set_title(title)
+    if SHOW_FIGURE_TITLES:
+        ax.set_title(title)
     ax.grid(True, linestyle=":", linewidth=0.7)
     cb = fig.colorbar(im, ax=ax, fraction=0.05, pad=0.02)
     cb.set_label(cbar)
@@ -304,7 +323,8 @@ def _continuous_scatter_3d(
     ax.set_xlabel("Comp 1")
     ax.set_ylabel("Comp 2")
     ax.set_zlabel("Comp 3")
-    ax.set_title(title)
+    if SHOW_FIGURE_TITLES:
+        ax.set_title(title)
     cb = fig.colorbar(im, ax=ax, fraction=0.04, pad=0.03)
     cb.set_label(cbar)
     fig.savefig(out_path, dpi=240)
@@ -333,7 +353,8 @@ def _hex_landscape(
     )
     ax.set_xlabel("Component 1")
     ax.set_ylabel("Component 2")
-    ax.set_title(title)
+    if SHOW_FIGURE_TITLES:
+        ax.set_title(title)
     ax.grid(True, linestyle=":", linewidth=0.7)
     cb = fig.colorbar(hb, ax=ax, fraction=0.05, pad=0.02)
     cb.set_label(cbar)
@@ -451,10 +472,11 @@ def _interactive_plotly_3d(
 
 
 def main() -> None:
+    global SHOW_FIGURE_TITLES
     parser = argparse.ArgumentParser(description="Create aesthetic 2D/3D latent manifold visualizations.")
     parser.add_argument("--npz", required=True, help="Path to extracted latent .npz (e.g. extracted_with_flow_best.npz)")
     parser.add_argument("--name", default="with_flow_best")
-    parser.add_argument("--out", default="plots/latent_manifold")
+    parser.add_argument("--out", default="analysis/outputs/latent/manifold")
     parser.add_argument("--method", default="auto", choices=["auto", "pca", "tsne", "umap"])
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max-samples", type=int, default=7000)
@@ -464,12 +486,15 @@ def main() -> None:
     parser.add_argument("--umap-neighbors", type=int, default=20)
     parser.add_argument("--umap-min-dist", type=float, default=0.08)
     parser.add_argument("--interactive", action="store_true", help="Export interactive Plotly 3D html")
+    parser.add_argument("--font-size", type=float, default=11, help="Base font size for generated figures")
+    parser.add_argument("--no-figure-titles", action="store_true", help="Omit figure-level titles intended to be supplied by manuscript captions")
     args = parser.parse_args()
+    SHOW_FIGURE_TITLES = not args.no_figure_titles
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     if HAS_MPL:
-        _setup_style()
+        _setup_style(args.font_size)
     else:
         warnings.warn("matplotlib not available; static plots will be skipped.")
 

@@ -1,4 +1,16 @@
 
+"""Render dataset event windows, optionally alongside EVFlowNet predictions.
+
+This legacy, fixed-configuration script reads training sequences 0000--0027,
+bins their raw events, builds count/timestamp surfaces, and optionally runs the
+checkpoint at `weights/evflownet/evflownet.pth` to visualize optical flow.
+
+It creates one animated GIF per sequence under
+`analysis/outputs/flow/sequence_events/`. Configuration is set by the module
+constants below, there is no CLI, and importing the module executes the full
+rendering job; run it from the repository root.
+"""
+
 import sys
 
 import cv2
@@ -11,7 +23,7 @@ from pathlib import Path
 
 from numba import njit
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -201,7 +213,7 @@ def frames_to_gif(
 SEQUENCE_PATH = Path("elope_data") / "train"
 
 # Path where to store the data
-SAVE_PATH = Path("sequence_events")
+SAVE_PATH = Path("analysis") / "outputs" / "flow" / "sequence_events"
 
 # Event integration window in microseconds
 INTEGRATION_WINDOW = 1e4
